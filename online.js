@@ -1,18 +1,18 @@
 /* 漢字おはじき Ver.1.7 — Firebase Firestore turn-based online relay.
    Remote movement is replayed locally; the shooter submits the final board
    as the authoritative end-of-turn state (server validation is NOT provided).
-   Uses the user's existing asobeat-91aef project. No hosting backend needed. */
+   Uses the dedicated kanji-ohajiki Firebase project. No hosting backend needed. */
 import {initializeApp} from 'https://www.gstatic.com/firebasejs/12.11.0/firebase-app.js';
 import {getAuth,signInAnonymously} from 'https://www.gstatic.com/firebasejs/12.11.0/firebase-auth.js';
 import {getFirestore,doc,runTransaction,onSnapshot,updateDoc,serverTimestamp} from 'https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js';
 
 const firebaseConfig={
- apiKey:'AIzaSyCGTLi4K7baN12VPL98Hm4CZ8xOQcjMxpc',
- authDomain:'asobeat-91aef.firebaseapp.com',
- projectId:'asobeat-91aef',
- storageBucket:'asobeat-91aef.firebasestorage.app',
- messagingSenderId:'708217053143',
- appId:'1:708217053143:web:43f03c653ee40795df7592'
+ apiKey:'AIzaSyCSZTyGQsnC5suS7N0FjjDWzrigad7_9KE',
+ authDomain:'kanji-ohajiki.firebaseapp.com',
+ projectId:'kanji-ohajiki',
+ storageBucket:'kanji-ohajiki.firebasestorage.app',
+ messagingSenderId:'603509872430',
+ appId:'1:603509872430:web:18f6fbd4a4da2fc4d00cbf'
 };
 const app=initializeApp(firebaseConfig,'kanji-ohajiki-v17');
 const db=getFirestore(app),auth=getAuth(app);
