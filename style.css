@@ -43,3 +43,31 @@
 .wheel-note{font-size:12px;font-weight:800;color:#788592;}
 @media(max-width:390px){.sudden-box b{font-size:clamp(18px,5.4vw,25px)}.roulette-core{padding:28px 18px}.wheel-holder{width:min(240px,66vw)}}
 @media(prefers-reduced-motion:reduce){.sudden-overlay{animation:none}.roulette-wheel{transition:none!important}}
+
+/* Ver.1.4: readable attack-vs-ability glossary and a single-source ability table. */
+.ability-home-btn{width:100%;border:1px solid #d5c6ae;color:#38556a;background:#fff9ec;
+  border-radius:11px;padding:10px 13px;font-size:12px;font-weight:950;text-align:left;
+  display:flex;justify-content:space-between;align-items:center;min-height:40px}
+.ability-home-btn span{font-size:21px;color:#a08b63}
+.ability-guide-card{background:#fff9ec;border:1px solid #e4d6b9;border-radius:14px;padding:11px 12px 13px;margin-top:16px}
+.ability-guide-card>summary{cursor:pointer;font-size:13px;font-weight:950;color:#33495a;list-style-position:inside;padding:3px 0 8px}
+.ability-guide-card>summary span{font-size:10px;float:right;color:#967f60;padding-top:3px}
+.ability-definition{padding:10px 11px;background:#e9f1f6;border-left:4px solid #3483b4;border-radius:9px;
+  line-height:1.7;font-size:11.5px;color:#304659;font-weight:650;margin:7px 0 10px}
+.ability-definition b{font-weight:1000;color:#184a6d}
+.ability-scroll{width:100%;overflow-x:auto;border:1px solid #e6e3db;border-radius:10px;background:white;-webkit-overflow-scrolling:touch}
+.ability-table{border-collapse:collapse;width:100%;font-size:11px;color:#354b5f;table-layout:fixed}
+.ability-table th,.ability-table td{border-bottom:1px solid #eceae5;padding:9px 9px;vertical-align:top;text-align:left;overflow-wrap:anywhere}
+.ability-table thead th{background:#f3eee5;font-size:10px;letter-spacing:.3px;color:#665c4e}
+.ability-table tbody th{width:88px;font-size:17px;letter-spacing:1px;white-space:nowrap;color:#1f4866}
+.ability-table thead th:first-child{width:88px}
+.ability-table tbody th small{display:block;color:#9b8a73;font-size:9px;font-weight:850;white-space:normal;letter-spacing:0}
+.ability-table td b{font-size:11px;color:#294f69;font-weight:950}
+.ability-table td span{display:block;margin-top:4px;line-height:1.55;font-size:10.5px;color:#667687}
+.ability-table tr:last-child th,.ability-table tr:last-child td{border-bottom:0}
+.ability-extra{font-size:10.5px;color:#60717f;line-height:1.75;margin:11px 2px 3px;font-weight:650}
+.ability-extra b{color:#2c506b}
+.modal-content .ability-definition{font-size:12px}
+.modal-content .ability-table td b{font-size:11px}
+.modal-content .ability-extra{font-size:11px}
+@media(max-width:390px){.ability-table th,.ability-table td{padding:8px 6px}.ability-table tbody th,.ability-table thead th:first-child{width:72px}.ability-table tbody th{font-size:15px}.ability-table td b{font-size:10.5px}.ability-guide-card{padding:10px 9px}.ability-definition{font-size:10.5px}}

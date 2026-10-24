@@ -1,7 +1,7 @@
-/* 漢字おはじき Ver.1.3 | ASOBEAT — preparation and sudden death */
+/* 漢字おはじき Ver.1.4 | ASOBEAT — preparation and sudden death */
 (function(){'use strict';
 const P=window.KanjiPhysics;if(!P){document.body.textContent='物理エンジンを読み込めませんでした。';return;}
-const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'停止後1秒・敵を自動追尾','衝撃':'0.5秒跳躍→1コマ衝撃','鉄壁':'味方を守る半径3コマの陣','渦巻':'敵に命中後1秒の渦','巨大':'命中で1.2倍巨大化（最大3回）','一撃':'発射中の対敵衝突×2'};
+const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'停止後1秒・敵を自動追尾','衝撃':'0.5秒で2コマ跳躍→半径1コマの能力衝撃波','鉄壁':'物理攻撃だけ軽減（能力は通常どおり）','渦巻':'敵に命中後1秒の渦','巨大':'命中で1.2倍巨大化（最大3回）','一撃':'発射中の対敵衝突×2'};
 const $=id=>document.getElementById(id),ctx=$('board').getContext('2d',{alpha:false});
 const {W,H}=P,PI=Math.PI,TAU=PI*2,clamp=P.clamp;
 const scenes=['home','setup','confirm','game','result'];
@@ -151,7 +151,7 @@ function collisionHooks(){return {
   st.shake=5.5;st.hitstop=Math.max(st.hitstop,.05);st.flash=.32;
   addRing(wave.x,wave.y,'#a7ffff',P.PIECE_UNIT);
   addParticles(wave.x,wave.y,20,'#82f4ff',.95);
-  showText('衝撃着地！',wave.x,wave.y,'#dcffff');showEffect('衝撃：着地から1コマ衝撃波！',800);sound('shock');
+  showText('衝撃着地！',wave.x,wave.y,'#dcffff');showEffect('衝撃：2コマジャンプ→通常100%攻撃相当の衝撃波！',930);sound('shock');
  },
  shockHit:(wave,target,impulse)=>{
   addParticles(target.x,target.y,Math.max(5,Math.round(impulse/100)),'#8ddbf3',.65);
@@ -227,7 +227,7 @@ function updateFieldStatus(){
  const el=$('fieldStatus');if(!el||!st.world)return;
  const w=st.world,fields=w.fields;
  if(w.preparation){el.className='field-status prep';el.textContent=`準備 ${w.prepTurns+1}/2｜場外・中央封鎖 / 能力OFF`;return;}
- if(fields.length){el.className='field-status '+(fields[0].owner===0?'blue':'red');el.textContent=(fields[0].owner===0?'🔵 青':'🔴 赤')+' 鉄壁護陣：味方の被弾×0.7・半径3コマ';return;}
+ if(fields.length){el.className='field-status '+(fields[0].owner===0?'blue':'red');el.textContent=(fields[0].owner===0?'🔵 青':'🔴 赤')+' 鉄壁護陣：味方への攻撃×0.7・能力×1.0 / 半径3コマ';return;}
  if(w.suddenDeath){el.className='field-status sudden';el.textContent=`⚠️ サドンデス：場外が毎ターン1コマ拡大（+${w.suddenTurns}）`;return;}
  el.className='field-status hidden';
 }
@@ -466,13 +466,13 @@ function drawDrag(){const d=st.drag;if(!d||!d.body||!d.body.alive)return;const l
  ctx.fillStyle=st.turn===0?'#2580bd':'#cb4e4b';ctx.beginPath();ctx.moveTo(endx+dx*19,endy+dy*19);ctx.lineTo(endx-dy*13-dx*6,endy+dx*13-dy*6);ctx.lineTo(endx+dy*13-dx*6,endy-dx*13-dy*6);ctx.closePath();ctx.fill();
  // No line back to the finger: display only the shot direction arrow.
  if(d.body.ability==='shock'&&!st.world.preparation){
-  const px=clamp(x+dx*P.PIECE_UNIT,d.body.w*.65,W-d.body.w*.65);
-  const py=clamp(y+dy*P.PIECE_UNIT,d.body.h*.65,H-d.body.h*.65);
+  const px=clamp(x+dx*P.PIECE_UNIT*P.SHOCK_JUMP_PIECES,d.body.w*.65,W-d.body.w*.65);
+  const py=clamp(y+dy*P.PIECE_UNIT*P.SHOCK_JUMP_PIECES,d.body.h*.65,H-d.body.h*.65);
   ctx.setLineDash([7,5]);ctx.shadowBlur=0;ctx.lineWidth=3;
   ctx.strokeStyle='#2caac8';ctx.fillStyle='#57d9ee1f';
-  ctx.beginPath();ctx.arc(px,py,P.PIECE_UNIT,0,TAU);ctx.fill();ctx.stroke();
+  ctx.beginPath();ctx.arc(px,py,P.PIECE_UNIT*P.SHOCK_RADIUS_PIECES,0,TAU);ctx.fill();ctx.stroke();
   ctx.setLineDash([]);ctx.font='900 14px sans-serif';ctx.textAlign='center';
-  ctx.fillStyle='#15718f';ctx.fillText('着地予測',px,clamp(py-P.PIECE_UNIT-10,18,H-20));
+  ctx.fillStyle='#15718f';ctx.fillText('着地予測・2コマ先',px,clamp(py-P.PIECE_UNIT*P.SHOCK_RADIUS_PIECES-10,18,H-20));
  }
  ctx.restore();
  ctx.textAlign='center';ctx.fillStyle='#293747ed';ctx.font='950 16px system-ui';
@@ -535,7 +535,22 @@ $('gameScene').addEventListener('lostpointercapture',e=>{if(st.drag&&e.pointerId
 $('quitBtn').addEventListener('click',()=>{onModal(`<p><b>対戦を終了しますか？</b></p><p>この対戦の進行状況は保存されません。</p><button type="button" class="ghost-btn" id="endMatch">対戦を終了してタイトルへ戻る</button>`,'対戦を終了');$('endMatch').addEventListener('click',()=>{cancelAsync();st.phase='title';changeScene('home')})});
 $('rematchBtn').addEventListener('click',()=>{const bits=new Uint32Array(1);try{crypto.getRandomValues(bits)}catch(e){bits[0]=Math.floor(Math.random()*2)};startMatch(bits[0]%2)});
 $('resultHomeBtn').addEventListener('click',()=>{cancelAsync();st.phase='title';changeScene('home')});
-$('helpBtn').addEventListener('click',()=>onModal(`<p><b>① 漢字を選んで、どこからでも弾く</b><br>自分の漢字をタップ→盤面の好きな場所（外側でもOK）からドラッグ。矢印方向へ飛び、指を離すと発射。漢字から遠い位置で始めると強回転。引っ張り中の2本指目タップでキャンセル。</p><p><b>② 熟語合体</b><br>2文字がぶつかると合体。暴走・衝撃・鉄壁・渦巻・巨大・一撃の6能力から3つ選べます。</p><p><b>③ 特殊能力</b><br>暴走：いったん止まったら1秒間、最寄りの敵を追尾。<br>衝撃：発射すると0.5秒で1コマジャンプし、半径1コマの通常威力の円形衝撃波。着地点をガイドで表示。<br>鉄壁：本体は被弾×0.6、自ターン終了後に半径3コマの青/赤防御フィールドを展開。味方の被弾×0.7、相手ターン後に消滅。<br>渦巻：敵に命中した発射の停止後、1秒間の渦を展開。触れた味方・敵に効果。範囲は旧版の半分。<br>巨大：敵に当てるたび1.2倍大きく、攻撃力1.1倍ずつ（最大3回、試合中永続）。<br>一撃：発射中に敵に当たると衝突力×2。</p><p><b>④ 覚醒</b><br>残り1コマが未合体なら元の熟語に覚醒。両陣営1コマずつでサドンデスとなり、毎ターン場外幅が1コマ拡大します。</p><p><b>⑤ 勝利</b><br>最初の2ターンは中央と場外を封鎖し、能力は無効（合体は可能）。その後は四辺中央の場外口から相手を全部落とす。角当てでCRITICAL ×1.2！</p>`, '遊びかた'));
+function abilityManualHTML(){
+ const explanation='<div class="ability-definition"><b>攻撃</b>：コマ同士の物理的な接触で飛ばすこと。暴走の追尾中にぶつかる場合も攻撃です。'+
+  '<br><b>能力</b>：漢字の効果で直接動かすこと。衝撃波・渦巻は能力に分類されます。'+
+  '<br><b>鉄壁</b>は攻撃だけを軽減し、能力には<b>倍率×1.0</b>で通常どおり影響されます。'+
+  '<br><b>連鎖</b>：能力で動いたコマが別のコマにぶつかった場合、その二次衝突は攻撃です。</div>';
+ const rows=P.ABILITY_RULES.map(a=>`<tr><th scope="row">${a.word}<small>${a.kind}</small></th><td><b>${a.numbers}</b><br><span>${a.timing}</span></td></tr>`).join('');
+ return explanation+`<div class="ability-scroll"><table class="ability-table"><thead><tr><th>熟語／分類</th><th>効果・倍率と発動条件</th></tr></thead><tbody>${rows}</tbody></table></div>`+
+ `<p class="ability-extra"><b>共通：</b>通常コマの最大発射速度は ${P.FULL_SHOT_SPEED}。角当てクリティカルは物理攻撃×1.2。衝撃の「100%」は単独・等質量の正面衝突を基準とするため、実際の移動量は質量・角度・他コマとの接触で変わります。</p>`+
+ '<p class="ability-extra"><b>操作：</b>漢字をタップして選択 → 好きな場所から逆方向へドラッグ → 指を離して発射。引き始めが漢字から遠いほど回転が強くなります。ドラッグ中は別の指でタップしてキャンセルできます。</p>'+
+ '<p class="ability-extra"><b>準備・終盤：</b>初めの合計2ターンは場外・中央封鎖で熟語能力OFF（合体は可能）。最後の未合体1文字は覚醒。双方残り1コマではサドンデスが始まり、1ターンごとに4方向の場外幅が1コマ広がります。</p>';
+}
+function openAbilityManual(){onModal(abilityManualHTML(),'熟語能力・倍率一覧')}
+$('helpBtn').addEventListener('click',openAbilityManual);
+$('abilityHomeBtn').addEventListener('click',openAbilityManual);
+// The same comparison table is available while choosing each three-word deck.
+$('abilitySetup').innerHTML=abilityManualHTML();
 $('modalClose').addEventListener('click',closeModal);$('modalOK').addEventListener('click',closeModal);$('modal').addEventListener('click',e=>{if(e.target===$('modal'))closeModal()});
 $('soundBtn').addEventListener('click',()=>{st.sound=!st.sound;$('soundBtn').classList.toggle('muted',!st.sound);$('soundBtn').textContent=st.sound?'♪':'×';if(st.sound){initAudio();sound('tap')}save()});
 $('soundBtn').classList.toggle('muted',!st.sound);$('soundBtn').textContent=st.sound?'♪':'×';

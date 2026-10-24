@@ -1,10 +1,26 @@
-/* 漢字おはじき Ver.1.3: dependency-free 2D compound-SAT impulse solver.
+/* 漢字おはじき Ver.1.4: dependency-free 2D compound-SAT impulse solver.
    World units: board coordinates 540 x 760. Time: seconds. Clockwise rotation is positive.
    Runs physics at a fixed 1/120 second timestep in game.js, render separately.
 */
 (function(global){'use strict';
 const W=540,H=760,EPS=1e-8;
 const PIECE_UNIT=62;
+// An ordinary 100% shot: 230 + 875 = 1105 units/s.
+// A centered, equal-mass (1 vs 1) impact at restitution 0.73 gives
+// j=(1+e)*speed/(1/m1+1/m2) = 955.825 world-impulse units.
+const FULL_SHOT_SPEED=230+875;
+const NORMAL_RESTITUTION=.73;
+const NORMAL_FULL_IMPULSE=(1+NORMAL_RESTITUTION)*FULL_SHOT_SPEED/2;
+const SHOCK_JUMP_PIECES=2, SHOCK_RADIUS_PIECES=1;
+const SHOCK_JUMP_SECONDS=.5;
+const ABILITY_RULES=[
+ {word:'暴走',kind:'攻撃（追尾）',timing:'一度停止すると最寄りの敵を追尾。追尾中に当たれば通常の物理攻撃。',numbers:'追尾1.0秒 ／ 衝突力×1.0（通常）'},
+ {word:'衝撃',kind:'能力（衝撃波）',timing:'発射後に前方2コマへ0.5秒ジャンプ。着地地点を中心に味方も敵も弾く。',numbers:'ジャンプ2コマ=124 ／ 半径1コマ=62 ／ 衝撃波は通常100%射撃の正面衝突相当'},
+ {word:'鉄壁',kind:'攻撃防御',timing:'本体は常に攻撃に強い。自ターン終了で護陣展開、相手ターン終了で消滅。',numbers:'本体への攻撃×0.6 ／ 半径3コマ（186）内の味方への攻撃×0.7 ／ 能力からの力×1.0'},
+ {word:'渦巻',kind:'能力（渦）',timing:'発射した渦巻が敵に衝突し、全コマ停止した後に周囲の味方・敵を旋回させる。',numbers:'1.0秒で2周 ／ 効果半径117.5（約1.9コマ） ／ 鉄壁でも通常どおり影響'},
+ {word:'巨大',kind:'攻撃強化',timing:'発射した巨大が敵に当たるたびに大きくなり、以後の物理攻撃が強化される。',numbers:'1回ごとサイズ×1.2・攻撃×1.1 ／ 最大3回：サイズ×1.728・攻撃×1.331（永続）'},
+ {word:'一撃',kind:'攻撃強化',timing:'発射した一撃が敵コマに衝突したとき、物理攻撃を強化。',numbers:'敵への衝突力×2.0 ／ 鉄壁の攻撃防御が有効'}
+];
 const WORDS={"暴走":{label:'暴走',ability:'burst'},"衝撃":{label:'衝撃',ability:'shock'},"鉄壁":{label:'鉄壁',ability:'iron'},"渦巻":{label:'渦巻',ability:'vortex'},"巨大":{label:'巨大',ability:'giant'},"一撃":{label:'一撃',ability:'strike'}};
 const mCan = document.createElement('canvas');mCan.width=300;mCan.height=110;
 const mCtx=mCan.getContext('2d',{willReadFrequently:true});
@@ -111,9 +127,11 @@ function fieldPosition(world,f){
  const anchor=world.bodies.find(b=>b.id===f.sourceId&&b.alive);
  return anchor?{x:anchor.x,y:anchor.y}:f;
 }
-function defenseFactor(world,b){
- if(!world||world.preparation||b.static||!b.alive)return 1;
- // The iron tile itself is 0.1 more resistant than the former 0.7 field.
+function defenseFactor(world,b,kind='attack'){
+ // Spell abilities (shockwave / vortex) always act at ×1.0, even in iron fields.
+ // Walls are neutral scenery, not an attacking piece.
+ if(kind!=='attack'||!world||world.preparation||b.static||!b.alive)return 1;
+ // Only tile-to-tile impacts use the iron-body and ally-field defense.
  let factor=b.ability==='iron'?.6:1;
  for(const f of world.fields){
   if(f.owner!==b.owner)continue;
@@ -123,8 +141,8 @@ function defenseFactor(world,b){
  return factor;
 }
 
-function applyImpulse(world,b,ix,iy,r,sign=1){if(b.static)return;
- const guard=defenseFactor(world,b);b.vx+=ix*b.invM*sign*guard;b.vy+=iy*b.invM*sign*guard;
+function applyImpulse(world,b,ix,iy,r,sign=1,kind='attack'){if(b.static)return;
+ const guard=defenseFactor(world,b,kind);b.vx+=ix*b.invM*sign*guard;b.vy+=iy*b.invM*sign*guard;
  b.omega+=cross(r,{x:ix,y:iy})*b.invI*sign*guard;
 }
 function isCorner(attacker,point){
@@ -152,7 +170,8 @@ function resolve(world,a,b,m,step,onImpact,attacker){
  if(!world.preparation&&isEnemy&&attacker&&attacker.ability==='vortex'&&attacker.id===world.shooterId&&contactSpeed>60)attacker.vortexHitEnemy=true;
  const impact=Math.min(6000,(-(1+restitution)*vn/denom)*(corner?1.2:1)*skill);
  const imp={x:n.x*impact,y:n.y*impact};
- applyImpulse(world,a,imp.x,imp.y,rA,-1);applyImpulse(world,b,imp.x,imp.y,rB,1);
+ const interaction=(a.static||b.static)?'wall':'attack';
+ applyImpulse(world,a,imp.x,imp.y,rA,-1,interaction);applyImpulse(world,b,imp.x,imp.y,rB,1,interaction);
  // Tangential impulse transfers spin into physically grounded sideways ricochets.
  const newA={x:a.vx-a.omega*rA.y,y:a.vy+a.omega*rA.x},newB={x:b.vx-b.omega*rB.y,y:b.vy+b.omega*rB.x};
  const tangent=vsub(newB,newA);let proj=dot(tangent,n);tangent.x-=proj*n.x;tangent.y-=proj*n.y;
@@ -160,7 +179,7 @@ function resolve(world,a,b,m,step,onImpact,attacker){
  if(tlen>EPS){tangent.x/=tlen;tangent.y/=tlen;
   const ta=cross(rA,tangent),tb=cross(rB,tangent),tden=inv+ta*ta*a.invI+tb*tb*b.invI;
   if(tden>EPS){const slip=dot(vsub(newB,newA),tangent);const jt=clamp(-slip/tden,-impact*.26,impact*.26);
-   applyImpulse(world,a,tangent.x*jt,tangent.y*jt,rA,-1);applyImpulse(world,b,tangent.x*jt,tangent.y*jt,rB,1)}
+   applyImpulse(world,a,tangent.x*jt,tangent.y*jt,rA,-1,interaction);applyImpulse(world,b,tangent.x*jt,tangent.y*jt,rB,1,interaction)}
  }
  if(onImpact&&(contactSpeed>80||(attacker?.shockArmed&&attacker.id===world.shooterId)))onImpact({a,b,p,n,speed:contactSpeed,corner,impulse:impact,skill,step});
 }
@@ -212,9 +231,10 @@ function step(world,dt,hooks={}){
    const px=cx+Math.cos(ang)*radius,py=cy+Math.sin(ang)*radius;
    const w=4*Math.PI/v.duration,vr=v.expand/v.duration;
    const vx=vr*Math.cos(ang)-radius*w*Math.sin(ang),vy=vr*Math.sin(ang)+radius*w*Math.cos(ang);
-   const bias=0.55,guard=defenseFactor(world,b);
-   b.vx+=clamp((px-b.x)*7+vx-b.vx,-2000,2000)*Math.min(1,dt*8)*bias*guard;
-   b.vy+=clamp((py-b.y)*7+vy-b.vy,-2000,2000)*Math.min(1,dt*8)*bias*guard;
+   // Vortex is an ability, NOT a physical attack. Iron cannot reduce its effect.
+   const bias=0.55;
+   b.vx+=clamp((px-b.x)*7+vx-b.vx,-2000,2000)*Math.min(1,dt*8)*bias;
+   b.vy+=clamp((py-b.y)*7+vy-b.vy,-2000,2000)*Math.min(1,dt*8)*bias;
    break;
   }
   let speed=hypot(b.vx,b.vy);
@@ -229,7 +249,7 @@ function step(world,dt,hooks={}){
   if(b.angle>Math.PI*2)b.angle-=Math.PI*2;if(b.angle< -Math.PI*2)b.angle+=Math.PI*2;
   b.flash=Math.max(0,b.flash-dt*3);
  }
- // Shock-wave follows a short two-piece jump, then ejects every piece within two-piece radius.
+ // Ability: one-piece-radius shock after a two-piece jump; independent of iron defense.
  // A propagating front applies one impulse per piece, precisely when it reaches the piece.
  if(world.shocks.length){
   for(let i=world.shocks.length-1;i>=0;i--){
@@ -238,15 +258,16 @@ function step(world,dt,hooks={}){
    for(const target of bodies){
     if(!target.alive||target.merging||wave.hit.has(target.id))continue;
     const dx=target.x-wave.x,dy=target.y-wave.y,dist=hypot(dx,dy);
-    if(dist > wave.radius+target.radius*.23)continue;
+    // Center must be inside the exact radius-one-piece area (not merely overlapping).
+    if(dist > wave.radius+1e-7)continue;
     wave.hit.add(target.id);
-    // Normal-contact strength rather than a screen-clearing blast; affects both teams.
-    const falloff=1-.25*clamp(dist/wave.maxRadius,0,1);
-    const guard=defenseFactor(world,target);
-    const impulse=290*falloff*guard/Math.sqrt(target.mass);
+    // A 100% ordinary shot into a stationary equal-mass tile (head-on) yields
+    // NORMAL_FULL_IMPULSE. Apply this impulse radially, with normal mass response.
+    // There is intentionally NO iron-body or iron-field multiplier here.
+    const impulse=NORMAL_FULL_IMPULSE;
     const nx=dist>1?dx/dist:wave.jumpDir.x,ny=dist>1?dy/dist:wave.jumpDir.y;
-    target.vx+=nx*impulse;target.vy+=ny*impulse;
-    target.omega+=((target.id%2)?1:-1)*(.65*falloff)*guard;
+    target.vx+=nx*impulse*target.invM;target.vy+=ny*impulse*target.invM;
+    target.omega+=((target.id%2)?1:-1)*.65;
     target.flash=Math.max(target.flash,.5);
     hooks.shockHit?.(wave,target,impulse);
    }
@@ -374,10 +395,10 @@ function fire(world,b,dx,dy,power,spin,spinStrength=1){
  b.vortexArmed=!world.preparation&&b.ability==='vortex';b.vortexTriggered=false;b.vortexHitEnemy=false;
  b.jump=null;
  if(b.shockArmed){
-  const from={x:b.x,y:b.y},to={x:clamp(b.x+b.shotDir.x*PIECE_UNIT,b.w*.65,W-b.w*.65),
-   y:clamp(b.y+b.shotDir.y*PIECE_UNIT,b.h*.65,H-b.h*.65)};
+  const from={x:b.x,y:b.y},to={x:clamp(b.x+b.shotDir.x*PIECE_UNIT*SHOCK_JUMP_PIECES,b.w*.65,W-b.w*.65),
+   y:clamp(b.y+b.shotDir.y*PIECE_UNIT*SHOCK_JUMP_PIECES,b.h*.65,H-b.h*.65)};
   b.vx=0;b.vy=0;
-  b.jump={from,to,age:0,duration:.5};
+  b.jump={from,to,age:0,duration:SHOCK_JUMP_SECONDS};
  }
 
  world.shooterId=b.id;world.lastShooterOwner=b.owner;world.shotTime=world.time;
@@ -410,7 +431,7 @@ function triggerShock(world,attacker){
 }
 function spawnShockWave(world,attacker){
  const wave={x:attacker.x,y:attacker.y,owner:attacker.owner,sourceId:attacker.id,
-  jumpDir:{...attacker.shotDir},age:0,radius:0,maxRadius:PIECE_UNIT,speed:380,hit:new Set([attacker.id])};
+  jumpDir:{...attacker.shotDir},age:0,radius:0,maxRadius:PIECE_UNIT*SHOCK_RADIUS_PIECES,speed:380,hit:new Set([attacker.id])};
  world.shocks.push(wave);return wave;
 }
 
@@ -436,6 +457,20 @@ function evaluateShot(world, shooter,dir,power,spin){
  const actor=bs.find(b=>b.src);if(!actor)return -Infinity;
  let speed=(230+875*Math.pow(power,1.12)),len=hypot(dir.x,dir.y)||1;
  actor.vx=dir.x/len*speed;actor.vy=dir.y/len*speed;
+ // CPU predictor mirrors the two-piece shock landing and its one-piece-radius skill.
+ // This is an inexpensive planning approximation; the real move still uses the SAT engine.
+ if(!world.preparation&&shooter.ability==='shock'){
+  actor.x=clamp(actor.x+dir.x/len*PIECE_UNIT*SHOCK_JUMP_PIECES,shooter.w*.65,W-shooter.w*.65);
+  actor.y=clamp(actor.y+dir.y/len*PIECE_UNIT*SHOCK_JUMP_PIECES,shooter.h*.65,H-shooter.h*.65);
+  actor.vx=0;actor.vy=0;
+  for(const target of bs){if(target===actor)continue;
+   const dx=target.x-actor.x,dy=target.y-actor.y,dist=hypot(dx,dy);
+   if(dist>PIECE_UNIT*SHOCK_RADIUS_PIECES)continue;
+   const nx=dist>1?dx/dist:dir.x/len,ny=dist>1?dy/dist:dir.y/len;
+   target.vx+=nx*NORMAL_FULL_IMPULSE/target.m;
+   target.vy+=ny*NORMAL_FULL_IMPULSE/target.m;
+  }
+ }
  const n0=[remaining(world,0),remaining(world,1)],merges=0;
  let t=0,doneMerges=0;
  for(let stepN=0;stepN<95;stepN++){
@@ -486,5 +521,5 @@ function evaluateShot(world, shooter,dir,power,spin){
  score+=Math.min(movement,250)*.018;
  return score;
 }
-global.KanjiPhysics={W,H,WORDS,PIECE_UNIT,body,newWorld,spawnInitial,step,fire,settle,remaining,allStopped,createMerged,triggerShock,awakenPiece,shapeFor,manifold,evaluateShot,finishTurn,openArena,expandGates,defenseFactor,fieldPosition,growGiant,startVortex,clamp};
+global.KanjiPhysics={W,H,WORDS,PIECE_UNIT,FULL_SHOT_SPEED,NORMAL_FULL_IMPULSE,SHOCK_JUMP_PIECES,SHOCK_RADIUS_PIECES,SHOCK_JUMP_SECONDS,ABILITY_RULES,body,newWorld,spawnInitial,step,fire,settle,remaining,allStopped,createMerged,triggerShock,awakenPiece,shapeFor,manifold,evaluateShot,finishTurn,openArena,expandGates,defenseFactor,fieldPosition,growGiant,startVortex,clamp};
 })(window);
