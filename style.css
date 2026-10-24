@@ -14,3 +14,11 @@
 .awakening-metric{background:#fffaea;border-color:#ecdba5;}
 .awakening-metric b{color:#ae7a2a;}
 @media(max-width:390px){.aim-hint{font-size:10px;padding:6px 10px;}.spin-meter{font-size:9px}.result-metric small{font-size:8px}}
+
+/* Ver.1.2 ability callouts / responsive pill */
+.field-status{position:absolute;top:20px;left:50%;transform:translateX(-50%);z-index:3;pointer-events:none;background:#1b73aeeb;border:1px solid #a0d8f6;color:white;border-radius:100px;padding:8px 12px;font-size:12px;line-height:1.2;font-weight:900;text-align:center;white-space:normal;max-width:92%;box-shadow:0 4px 12px #0015;}
+.field-status.red{background:#b94a52e8;border-color:#ffccd0;}
+.field-status.blue{background:#2378b1e8;border-color:#b2e6ff;}
+@media(max-width:390px){.field-status{font-size:10px;padding:6px 9px;top:18px;}}
+/* Six abilities with legible small-screen deck hints */
+.deck-slot .slot-effect{white-space:normal;min-height:26px;line-height:1.35;overflow-wrap:anywhere;display:flex;align-items:center;justify-content:center;}

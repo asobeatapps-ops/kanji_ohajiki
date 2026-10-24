@@ -1,11 +1,11 @@
-/* 漢字おはじき Ver.1.1 | ASOBEAT — anywhere aim, shock blast, awakening */
+/* 漢字おはじき Ver.1.2 | ASOBEAT — anywhere aim, shock blast, awakening */
 (function(){'use strict';
 const P=window.KanjiPhysics;if(!P){document.body.textContent='物理エンジンを読み込めませんでした。';return;}
-const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'1秒後に加速','衝撃':'初衝突で円形爆風','鉄壁':'吹き飛びに強い'};
+const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'停止後3秒・敵を自動追尾','衝撃':'2コマ跳躍→全方位衝撃','鉄壁':'ターン終了後、味方の防御陣','渦巻':'敵を2周の渦へ巻き込む','巨大':'命中で1.2倍巨大化（最大3回）','一撃':'発射中の対敵衝突×2'};
 const $=id=>document.getElementById(id),ctx=$('board').getContext('2d',{alpha:false});
 const {W,H}=P,PI=Math.PI,TAU=PI*2,clamp=P.clamp;
 const scenes=['home','setup','confirm','game','result'];
-const st={scene:'home',mode:'solo',diff:'normal',decks:[['暴走','衝撃','鉄壁'],['衝撃','鉄壁','暴走']],names:['青チーム','CPU'],world:null,phase:'title',turn:0,spin:1,drag:null,selected:null,fx:[],texts:[],bannerUntil:0,shake:0,flash:0,hitstop:0,time:0,acc:0,moving:0,still:0,shotCount:0,stats:{outs:[0,0],merges:[0,0],crits:[0,0],awakens:[0,0]},turnToken:0,sound:true,result:null,geom:null};
+const st={scene:'home',mode:'solo',diff:'normal',decks:[['暴走','衝撃','鉄壁'],['衝撃','鉄壁','暴走']],names:['青チーム','CPU'],world:null,phase:'title',turn:0,spin:1,drag:null,selected:null,fx:[],texts:[],bannerUntil:0,shake:0,flash:0,hitstop:0,time:0,acc:0,moving:0,still:0,shotCount:0,stats:{outs:[0,0],merges:[0,0],crits:[0,0],awakens:[0,0]},vortexPlayed:false,turnToken:0,sound:true,result:null,geom:null};
 let audio=null,noiseBuffer=null,animLast=0,rafId=0;let timers=[];
 function later(fn,ms){const token=st.turnToken;const id=setTimeout(()=>{timers=timers.filter(x=>x!==id);if(token===st.turnToken)fn()},ms);timers.push(id);return id}
 function cancelAsync(){st.turnToken++;for(const id of timers)clearTimeout(id);timers=[]}
@@ -67,7 +67,7 @@ function roulette(){cancelAsync();initAudio();const bits=new Uint32Array(1);try{
  later(()=>startMatch(first),1970);
 }
 function makeNames(){for(let i=0;i<2;i++)$('gameName'+i).textContent=st.names[i]}
-function startMatch(first=null){cancelAsync();st.world=P.newWorld();P.spawnInitial(st.world,st.decks);st.drag=null;st.selected=null;st.fx=[];st.texts=[];st.phase='playing';st.turn=first===null?st.turn:first;st.spin=1;st.hitstop=0;st.shake=0;st.flash=0;st.time=0;st.acc=0;st.moving=0;st.still=0;st.shotCount=0;st.result=null;st.stats={outs:[0,0],merges:[0,0],crits:[0,0],awakens:[0,0]};st._impactTimes=new Map();
+function startMatch(first=null){cancelAsync();st.world=P.newWorld();P.spawnInitial(st.world,st.decks);st.drag=null;st.selected=null;st.fx=[];st.texts=[];st.phase='playing';st.turn=first===null?st.turn:first;st.spin=1;st.hitstop=0;st.shake=0;st.flash=0;st.time=0;st.acc=0;st.moving=0;st.still=0;st.shotCount=0;st.vortexPlayed=false;st.result=null;st.stats={outs:[0,0],merges:[0,0],crits:[0,0],awakens:[0,0]};st._impactTimes=new Map();
  $('spinRight').classList.add('active');$('spinLeft').classList.remove('active');makeNames();
  changeScene('game');resizeCanvas();updateHud();beginTurn();
 }
@@ -82,18 +82,21 @@ function beginTurn(){if(st.phase==='result'||!st.world)return;st.phase='playing'
  $('phaseText').textContent=st.mode==='solo'&&st.turn===1?'CPU思考中…':'漢字を弾こう';
  $('selectedLabel').textContent=st.mode==='solo'&&st.turn===1?'CPUが狙っています…':'① 漢字をタップして選択';
  $('hintLabel').textContent='② 好きな場所から逆方向へドラッグ';
- $('aimHint').classList.add('hidden');$('spinMeter').textContent='回転力 --';
+ $('aimHint').classList.add('hidden');$('spinMeter').textContent='回転力 --';updateFieldStatus();
  const cpu=st.mode==='solo'&&st.turn===1;
  for(const id of ['spinRight','spinLeft'])$(id).disabled=cpu;
  updateHud();if(cpu)later(cpuTakeTurn,550);
 }
 function fireShot(b,dirX,dirY,power,spin,spinStrength=1){if(st.phase!=='playing'||!b||!b.alive||b.owner!==st.turn)return false;
  const len=Math.hypot(dirX,dirY);if(len<.01||power<.06)return false;
- P.fire(st.world,b,dirX,dirY,power,spin,spinStrength);st.shotCount++;st.phase='moving';st.moving=0;st.still=0;st.acc=0;st.selected=null;st.drag=null;
+ P.fire(st.world,b,dirX,dirY,power,spin,spinStrength);st.vortexPlayed=false;st.shotCount++;st.phase='moving';st.moving=0;st.still=0;st.acc=0;st.selected=null;st.drag=null;
  $('phaseText').textContent='物理演算中…';$('selectedLabel').textContent=b.text+'、発射！';$('hintLabel').textContent='全コマが止まると交代';
  addParticles(b.x,b.y,10,st.turn===0?'#70c5f7':'#f4a29c',1);st.shake=2.6;sound('shoot');$('aimHint').classList.add('hidden');$('spinMeter').textContent='回転力 --';
- if(b.ability==='shock'){showEffect('初衝突で衝撃波！',800)}
- if(b.ability==='iron')showEffect('鉄壁、発進！',650);
+ if(b.ability==='shock')showEffect('着弾後2コマ跳躍 → 全方位衝撃！',950);
+ if(b.ability==='iron')showEffect('鉄壁：自ターン終了時に護陣！',900);
+ if(b.ability==='vortex')showEffect('渦巻：着地後に2周の渦！',950);
+ if(b.ability==='giant')showEffect('巨大：敵への命中で巨大化！',800);
+ if(b.ability==='strike')showEffect('一撃：敵への吹き飛ばし×2！',800);
  return true;
 }
 function collisionHooks(){return {
@@ -103,6 +106,7 @@ function collisionHooks(){return {
   if(shooter?.shockArmed && shooter.ability==='shock'){
     const wave=P.triggerShock(st.world,shooter,p);
     if(wave){st.shake=8;st.hitstop=Math.max(st.hitstop,.065);st.flash=.55;
+      addRing(wave.from.x,wave.from.y,'#a7ffff',90);addRing(wave.x,wave.y,'#e2ffff',P.PIECE_UNIT*2);
       addParticles(wave.x,wave.y,32,'#82f4ff',1.65);
       showText('衝撃炸裂!!',wave.x,wave.y,'#d1fbff');showEffect('衝撃・全方位爆発！',1100);sound('shock');}
   }
@@ -112,6 +116,15 @@ function collisionHooks(){return {
   st._impactTimes.set(key,st.world.time);
   const big=speed>165;
   if(big){addParticles(p.x,p.y,Math.min(18,Math.round(speed/45)),'#fbda92',speed/330);st.shake=Math.max(st.shake,clamp(speed/100,1.5,7.5));}
+  if(shooter&&a.owner!==b.owner&&!a.static&&!b.static){
+    if(shooter.ability==='giant'&&P.growGiant(st.world,shooter)){
+     addRing(shooter.x,shooter.y,'#eac864',shooter.radius*1.7);addParticles(shooter.x,shooter.y,23,'#ffd774',1.3);
+     st.flash=.20;showText('巨大化 ×'+shooter.growthStacks,shooter.x,shooter.y,'#fff2b4');showEffect('巨大化 '+shooter.growthStacks+'/3 !!',850);sound('merge');
+    }
+    if(shooter.ability==='strike'){
+     addParticles(p.x,p.y,22,'#ffc064',1.25);showText('一撃 ×2!!',p.x,p.y,'#ffe5a8');st.shake=Math.max(st.shake,7);sound('crit');
+    }
+  }
   if(corner){
    if(shooter&&a.owner!==b.owner&&!a.static&&!b.static){st.stats.crits[shooter.owner]++;st.hitstop=Math.max(st.hitstop,.05);st.flash=.26;showText('CRITICAL ×1.2!',p.x,p.y,'#fff1a2');sound('crit');}
   }else if(big){sound('impact',speed/300);if(speed>420)st.hitstop=Math.max(st.hitstop,.022)}
@@ -147,12 +160,31 @@ function tickPhysics(dt){if(st.hitstop>0){st.hitstop=Math.max(0,st.hitstop-dt);r
  }
  if(steps===8)st.acc=0;
  if(st.moving>.58&&P.allStopped(st.world))st.still+=dt;else st.still=0;
- if(st.still>.48||st.moving>9.5){P.settle(st.world);st.acc=0;finishShot()}
+ if(st.still>.48||st.moving>12.5){
+   const shooter=st.world.bodies.find(b=>b.id===st.world.shooterId&&b.alive);
+   if(!st.vortexPlayed&&shooter?.ability==='vortex'){
+    st.vortexPlayed=true;
+    const v=P.startVortex(st.world,shooter);
+    if(v){
+     st.still=0;st.moving=0;st.acc=0;
+     addRing(shooter.x,shooter.y,'#a875ed',180);addParticles(shooter.x,shooter.y,26,'#9c78ef',1.1);
+     showEffect('渦巻・敵を2周巻き込む！',1250);sound('shock');return;
+    }
+   }
+   P.settle(st.world);st.acc=0;finishShot();
+ }
+
 }
 function finishShot(){if(!st.world||st.phase!=='moving')return;const n0=P.remaining(st.world,0),n1=P.remaining(st.world,1);
  if(n0===0||n1===0){finishGame(n0===0&&n1===0?-1:n0===0?1:0);return}
+ const fields=P.finishTurn(st.world,st.turn);
+ if(fields.length){const iron=st.world.bodies.find(b=>b.id===fields[0].sourceId);
+  addRing(iron?.x??W/2,iron?.y??H/2,st.turn===0?'#4faeea':'#ec8077',P.PIECE_UNIT*2);
+  showEffect((st.turn===0?'青':'赤')+'の鉄壁護陣 展開！',950);sound('awake');
+ }
  st.turn=1-st.turn;beginTurn();
 }
+function updateFieldStatus(){const el=$('fieldStatus');if(!el||!st.world)return;const fields=st.world.fields;el.classList.toggle('hidden',!fields.length);if(fields.length){el.className='field-status '+(fields[0].owner===0?'blue':'red');el.textContent=(fields[0].owner===0?'🔵 青':'🔴 赤')+' 鉄壁護陣：味方への吹き飛ばし ×0.7';}}
 function finishGame(winner){cancelAsync();st.phase='result';st.result={winner,turns:st.shotCount,stats:JSON.parse(JSON.stringify(st.stats))};
  $('resultHeadline').classList.toggle('red',winner===1);
  $('resultHeadline').textContent=winner<0?'引き分け！':winner===0?'青の勝利！':'赤の勝利！';
@@ -194,7 +226,7 @@ function cpuTakeTurn(){if(!st.world||st.phase!=='playing'||st.turn!==1||st.mode!
  st.selected=choice.b;
  const imprecision=st.diff==='easy'?.17:st.diff==='normal'?.065:.014;
  const a=Math.atan2(choice.dy,choice.dx)+(Math.random()-.5)*imprecision;
- st.drag={cpu:true,body:choice.b,dx:Math.cos(a)*choice.power*140,dy:Math.sin(a)*choice.power*140,power:choice.power};
+ st.drag={cpu:true,body:choice.b,dx:Math.cos(a)*choice.power*140,dy:Math.sin(a)*choice.power*140,power:choice.power,spinStrength:1};
  $('selectedLabel').textContent='CPU：'+choice.b.text+'を狙う';
  later(()=>fireShot(choice.b,Math.cos(a),Math.sin(a),choice.power,choice.spin),650);
 }
@@ -207,7 +239,7 @@ function findSelected(pos){if(!st.world)return null;let best=null,dist=Infinity;
  }return best;
 }
 function selectPiece(b){st.selected=b;st.drag=null;
- $('selectedLabel').textContent=b.merged?`『${b.text}』を選択`:`「${b.text}」を選択`;
+ $('selectedLabel').textContent=b.merged?`『${b.text}』${b.ability==='giant'?' Lv'+b.growthStacks:''} を選択`:`「${b.text}」を選択`;
  $('hintLabel').textContent='盤面の外からでもドラッグして発射！';
  $('aimHint').textContent=`${b.text} を選択中 · 好きな位置で逆方向に引っ張ろう`;
  $('aimHint').classList.remove('hidden');
@@ -293,15 +325,17 @@ function resizeCanvas(){const canvas=$('board'),dpr=Math.min(2,window.devicePixe
 }
 function drawPiece(b){const color=b.owner===0?'#2473ab':'#c7504f',dark=b.owner===0?'#174766':'#782d30';
  const shine=b.owner===0?'#9fddfa':'#ffd2b9';
- ctx.save();ctx.translate(b.x,b.y);ctx.rotate(b.angle);
+ ctx.save();ctx.translate(b.x,b.y);ctx.rotate(b.angle);const scale=b.scale||1;ctx.scale(scale,scale);
  if(st.selected===b&&st.phase==='playing'){
  ctx.save();ctx.strokeStyle=b.owner===0?'#2ba5e3':'#d96255';ctx.lineWidth=2;ctx.setLineDash([5,5]);ctx.globalAlpha=.85;
  ctx.beginPath();ctx.ellipse(0,0,b.w*.70+11,b.h*.70+11,0,0,TAU);ctx.stroke();ctx.restore();
  }
  if(b.ability==='shock'){ctx.strokeStyle=b.shockArmed?'#4bd8eabb':'#57c8d34f';ctx.lineWidth=2.8;ctx.beginPath();ctx.ellipse(0,0,b.w*.64+9,b.h*.7+9,0,0,TAU);ctx.stroke()}
  if(b.awakened){ctx.strokeStyle='#f3c05cb8';ctx.shadowColor='#edc361';ctx.shadowBlur=10;ctx.lineWidth=4;ctx.beginPath();ctx.ellipse(0,0,b.w*.64+9,b.h*.70+9,0,0,TAU);ctx.stroke();ctx.shadowBlur=0;}
- if(b.ability==='burst'&&b.burstAge>=1&&b.burstAge<3){ctx.fillStyle='#ff613e33';ctx.beginPath();ctx.ellipse(0,0,b.w*.80,b.h*.75,0,0,TAU);ctx.fill()}
- if(b.ability==='iron'){ctx.lineWidth=2;ctx.strokeStyle='#c3ac76aa';ctx.strokeRect(-b.w*.53,-b.h*.57,b.w*1.06,b.h*1.14)}
+  if(b.ability==='burst'&&b.burstStage==='homing'){ctx.fillStyle='#ff613e33';ctx.beginPath();ctx.ellipse(0,0,b.w*.80,b.h*.75,0,0,TAU);ctx.fill()}
+  if(b.ability==='iron'){ctx.lineWidth=2;ctx.strokeStyle='#d1ab66cc';ctx.strokeRect(-b.w*.53/scale,-b.h*.57/scale,b.w*1.06/scale,b.h*1.14/scale)}
+  if(b.ability==='giant'){ctx.strokeStyle='#dcac39';ctx.lineWidth=2;ctx.strokeRect(-b.w*.52/scale,-b.h*.52/scale,b.w*1.04/scale,b.h*1.04/scale)}
+  if(b.ability==='vortex'){ctx.strokeStyle='#9875ca';ctx.lineWidth=2;ctx.beginPath();ctx.arc(0,0,Math.max(b.w,b.h)*.68/scale,0,TAU);ctx.stroke()}
  const shape=P.shapeFor(b.text),font=`1000 ${shape.fontSize}px "Noto Sans CJK JP","Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif`;
  ctx.font=font;ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineJoin='round';ctx.miterLimit=2;
  ctx.shadowColor='#3928215c';ctx.shadowOffsetX=3.5;ctx.shadowOffsetY=6;ctx.shadowBlur=4;ctx.lineWidth=7;ctx.strokeStyle='#f2e6d3';ctx.strokeText(b.text,0,shape.centerOffsetY);ctx.shadowColor='transparent';ctx.shadowOffsetY=0;ctx.shadowOffsetX=0;ctx.shadowBlur=0;
@@ -310,6 +344,30 @@ function drawPiece(b){const color=b.owner===0?'#2473ab':'#c7504f',dark=b.owner==
  ctx.fillStyle=color;ctx.fillText(b.text,0,shape.centerOffsetY);
  if(b.flash>0){ctx.globalAlpha=b.flash*.6;ctx.fillStyle='#fff';ctx.fillText(b.text,0,shape.centerOffsetY)}
  ctx.restore();
+}
+function drawFields(){
+ for(const f of st.world.fields){const p=P.fieldPosition(st.world,f),r=f.radius;
+  ctx.save();ctx.beginPath();ctx.arc(p.x,p.y,r,0,TAU);
+  const grad=ctx.createRadialGradient(p.x,p.y,9,p.x,p.y,r);
+  if(f.owner===0){grad.addColorStop(0,'rgba(64,167,237,.02)');grad.addColorStop(.8,'rgba(47,150,239,.13)');grad.addColorStop(1,'rgba(30,122,222,.24)');}
+  else{grad.addColorStop(0,'rgba(255,114,114,.02)');grad.addColorStop(.8,'rgba(245,98,106,.15)');grad.addColorStop(1,'rgba(214,58,71,.24)');}
+  ctx.fillStyle=grad;ctx.fill();ctx.strokeStyle=f.owner===0?'#238dda':'#e05261';ctx.lineWidth=4;
+  ctx.setLineDash([12,7]);ctx.stroke();ctx.setLineDash([]);ctx.globalAlpha=.48;
+  ctx.beginPath();ctx.arc(p.x,p.y,r-9,0,TAU);ctx.lineWidth=1;ctx.stroke();ctx.restore();
+ }
+}
+function drawVortices(){
+ for(const v of st.world.vortices){
+  const alpha=1-v.age/v.duration;ctx.save();ctx.translate(v.center.x,v.center.y);
+  ctx.strokeStyle=`rgba(138,85,217,${.38+.55*alpha})`;ctx.lineWidth=4;ctx.shadowColor='#a785fa';ctx.shadowBlur=9;
+  for(let arm=0;arm<3;arm++){ctx.beginPath();for(let i=0;i<=55;i++){
+   const theta=(i/55)*Math.PI*4+arm*2*Math.PI/3+v.age*2;
+   const rad=8+(i/55)*Math.min(230,110+v.expand);
+   if(i===0)ctx.moveTo(Math.cos(theta)*rad,Math.sin(theta)*rad);
+   else ctx.lineTo(Math.cos(theta)*rad,Math.sin(theta)*rad);
+  }ctx.stroke()}
+  ctx.restore();
+ }
 }
 function drawTrails(dt){for(const b of st.world.bodies){if(!b.alive)continue;
   const speed=Math.hypot(b.vx,b.vy);b.trailTime+=dt;
@@ -358,7 +416,7 @@ function paint(dt){if(!st.world||st.scene!=='game')return;
  ctx.setTransform($('board').width/W,0,0,$('board').height/H,0,0);ctx.clearRect(0,0,W,H);
  ctx.save();if(st.shake>.1)ctx.translate((Math.random()-.5)*st.shake*1.2,(Math.random()-.5)*st.shake*1.2);
  ctx.drawImage(artCanvas,0,0,W,H);
- drawTrails(dt);
+ drawFields();drawVortices();drawTrails(dt);
  for(const b of st.world.bodies)if(b.alive){drawPiece(b)}
  drawDrag();drawOverlays();
  if(st.flash>0){ctx.fillStyle=`rgba(255,250,214,${st.flash*.48})`;ctx.fillRect(0,0,W,H)}
@@ -389,13 +447,13 @@ $('gameScene').addEventListener('lostpointercapture',e=>{if(st.drag&&e.pointerId
 $('quitBtn').addEventListener('click',()=>{onModal(`<p><b>対戦を終了しますか？</b></p><p>この対戦の進行状況は保存されません。</p><button type="button" class="ghost-btn" id="endMatch">対戦を終了してタイトルへ戻る</button>`,'対戦を終了');$('endMatch').addEventListener('click',()=>{cancelAsync();st.phase='title';changeScene('home')})});
 $('rematchBtn').addEventListener('click',()=>{const bits=new Uint32Array(1);try{crypto.getRandomValues(bits)}catch(e){bits[0]=Math.floor(Math.random()*2)};startMatch(bits[0]%2)});
 $('resultHomeBtn').addEventListener('click',()=>{cancelAsync();st.phase='title';changeScene('home')});
-$('helpBtn').addEventListener('click',()=>onModal(`<p><b>① 好きな場所から発射</b><br>自分の漢字を1回タップして選択 → 次は盤面の好きな場所（盤面の外側でもOK）から指をドラッグ → 飛ばしたい方向の逆に引っ張って指を離す。右・左回転はボタンで変更できます。</p><p><b>② 回転力</b><br>選んだ漢字から、ドラッグを始めた位置が遠いほど回転が強くなります。方向はドラッグの向き、パワーはドラッグ距離で決まります。</p><p><b>③ 漢字を合体</b><br>暴＋走＝暴走、衝＋撃＝衝撃、鉄＋壁＝鉄壁。味方同士も敵味方でも合体できます。</p><p><b>④ 能力</b><br>暴走：1秒後から2秒間加速。<br>衝撃：発射後、最初の衝突地点（壁もOK）を中心に円形の大衝撃波。味方も飛びます。<br>鉄壁：発射速度0.8倍、弾かれにくい。</p><p><b>⑤ 覚醒</b><br>自分の残りが1コマで未合体なら、元の熟語へ自動覚醒！固有能力も使えます。</p><p><b>⑥ 勝利</b><br>四辺中央の場外口から相手を全部落とす。角当てでCRITICAL ×1.2！</p>`, '遊びかた'));
+$('helpBtn').addEventListener('click',()=>onModal(`<p><b>① 漢字を選んで、どこからでも弾く</b><br>自分の漢字をタップ→盤面の好きな場所（盤面の外側でもOK）からドラッグ。逆方向へ引っ張って指を離すと発射。漢字から離れた地点ほど強回転！</p><p><b>② 熟語合体</b><br>2文字がぶつかると合体。暴走・衝撃・鉄壁・渦巻・巨大・一撃の6能力から3つ選べます。</p><p><b>③ 特殊能力</b><br>暴走：いったん止まったら3秒間、最寄りの敵を追尾。<br>衝撃：最初の接触で2コマ分跳躍し、半径2コマの全方位爆風。自分も巻き込まれます。<br>鉄壁：自分のターン終了時、周辺2コマ分の青/赤防御フィールドを展開。内側の味方の被弾×0.7、相手ターン終了時に消滅。<br>渦巻：移動終了後、近くの敵を2周の外向きの渦へ巻き込む。<br>巨大：敵に当てるたび1.2倍大きく、攻撃力1.1倍ずつ（最大3回、試合中永続）。<br>一撃：発射中に敵に当たると衝突力×2。</p><p><b>④ 覚醒</b><br>残り1コマが未合体なら元の熟語に覚醒します。</p><p><b>⑤ 勝利</b><br>四辺中央の場外口から相手を全部落とす。角当てでCRITICAL ×1.2！</p>`, '遊びかた'));
 $('modalClose').addEventListener('click',closeModal);$('modalOK').addEventListener('click',closeModal);$('modal').addEventListener('click',e=>{if(e.target===$('modal'))closeModal()});
 $('soundBtn').addEventListener('click',()=>{st.sound=!st.sound;$('soundBtn').classList.toggle('muted',!st.sound);$('soundBtn').textContent=st.sound?'♪':'×';if(st.sound){initAudio();sound('tap')}save()});
 $('soundBtn').classList.toggle('muted',!st.sound);$('soundBtn').textContent=st.sound?'♪':'×';
 window.addEventListener('resize',()=>{if(st.scene==='game')resizeCanvas()});
 window.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();return}if(e.code==='Space'&&st.scene==='game'&&st.drag&&st.drag.body&&st.drag.power>.06){e.preventDefault();const d=st.drag;fireShot(d.body,d.dx,d.dy,d.power,st.spin,d.spinStrength??1)}});
 // Extra hook for deterministic and automated smoke tests; only exposed when ?test=1.
-if(new URLSearchParams(location.search).has('test'))window.__KANJI_TEST__={st,P,setup,confirm,startMatch,fireShot,finishGame,finishShot,beginTurn,selectPiece,aimSpinAt,draw:()=>paint(.016),cpuTakeTurn,resizeCanvas};
+if(new URLSearchParams(location.search).has('test'))window.__KANJI_TEST__={st,P,setup,confirm,startMatch,fireShot,finishGame,finishShot,beginTurn,selectPiece,aimSpinAt,draw:()=>paint(.016),cpuTakeTurn,resizeCanvas,tickPhysics,collisionHooks};
 makeBoardArt();requestAnimationFrame(mainLoop);
 })();

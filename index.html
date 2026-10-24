@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
   <meta name="theme-color" content="#151f30">
   <meta name="description" content="漢字を弾いて、熟語に合体！角当てクリティカルで相手を場外へ。ASOBEATの無料対戦おはじきゲーム。">
-  <title>漢字おはじき Ver.1.1 | ASOBEAT</title>
+  <title>漢字おはじき Ver.1.2 | ASOBEAT</title>
   <link rel="stylesheet" href="style.css">
   <script defer src="physics.js"></script>
   <script defer src="game.js"></script>
@@ -39,7 +39,7 @@
   <main id="setupScene" class="scene setup-scene hidden">
     <div class="scene-head"><button class="back-link" type="button" id="setupBack">‹ 戻る</button><span class="step-mark">01 / 対戦準備</span></div>
     <h1 class="scene-title">出陣する<span>熟語</span>を選べ。</h1>
-    <p class="section-note">3つの熟語が、それぞれ2文字に分かれて出陣。<br>同じ熟語を重複して選ぶこともできます。</p>
+    <p class="section-note">6つの能力から3つを選択。それぞれ2文字に分かれて出陣。<br>同じ熟語を重複して選ぶこともできます。</p>
     <div id="cpuSettings" class="form-card"><div class="card-top"><b>CPUの強さ</b><small>ひとりで遊ぶ</small></div>
       <div class="segmented" id="difficultyOptions" role="group" aria-label="CPU難易度">
         <button data-diff="easy" type="button">かんたん</button><button data-diff="normal" class="active" type="button">ふつう</button><button data-diff="hard" type="button">むずかしい</button>
@@ -78,6 +78,7 @@
     <div id="boardWrap" class="board-wrap">
       <canvas id="board" width="540" height="760" aria-label="漢字おはじきの対戦盤面"></canvas>
       <div id="effectBanner" class="effect-banner hidden" aria-live="polite"></div>
+      <div id="fieldStatus" class="field-status hidden" role="status"></div>
       <div id="aimHint" class="aim-hint hidden" role="status">漢字を選択しました · 好きな位置からドラッグ！</div>
       <div class="board-corner top-left">KANJI</div><div class="board-corner bottom-right">ARENA</div>
     </div>
@@ -109,8 +110,8 @@
     <div class="modal-panel"><button id="modalClose" class="modal-close" aria-label="閉じる" type="button">×</button><span class="eyebrow">HOW TO PLAY</span><h2 id="modalTitle">遊びかた</h2>
       <div id="modalContent" class="modal-content">
         <p>① 自分の漢字をタップして選択。<br>② 盤面内外の好きな位置から指を置き、逆方向へドラッグ。<br>③ 指を離すと発射！離れた位置からドラッグすると回転力UP。</p>
-        <p><b>熟語合体</b>：暴＋走＝暴走 / 衝＋撃＝衝撃 / 鉄＋壁＝鉄壁。対応する文字を衝突させると1つに合体して能力が発動します。</p>
-        <p><b>必殺能力</b>：暴走＝1秒後から2秒加速、衝撃＝最初の衝突地点から円形衝撃波、鉄壁＝飛ばされにくい。</p>
+        <p><b>熟語合体</b>：暴＋走＝暴走など、対応する2文字を衝突させると合体。6種類の熟語と能力を選べます。</p>
+        <p><b>必殺能力</b>：暴走＝停止後3秒間敵を追尾、衝撃＝2コマ跳躍して全方位爆風、鉄壁＝ターン後に味方の防御陣、渦巻＝敵を2周巻き込む、巨大＝命中で永続巨大化、一撃＝衝突力2倍。</p>
         <p><b>覚醒</b>：残り1コマが未合体なら、自動でその熟語に覚醒！</p>
         <p><b>コツ</b>：↻↺で回転を選択。漢字の角を相手に当てると1.2倍のクリティカル！四辺中央の赤い開口部から相手を落とせば勝利。</p>
       </div>
