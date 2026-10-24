@@ -1,7 +1,7 @@
-/* 漢字おはじき Ver.1.2 | ASOBEAT — anywhere aim, shock blast, awakening */
+/* 漢字おはじき Ver.1.3 | ASOBEAT — preparation and sudden death */
 (function(){'use strict';
 const P=window.KanjiPhysics;if(!P){document.body.textContent='物理エンジンを読み込めませんでした。';return;}
-const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'停止後3秒・敵を自動追尾','衝撃':'2コマ跳躍→全方位衝撃','鉄壁':'ターン終了後、味方の防御陣','渦巻':'敵を2周の渦へ巻き込む','巨大':'命中で1.2倍巨大化（最大3回）','一撃':'発射中の対敵衝突×2'};
+const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'停止後1秒・敵を自動追尾','衝撃':'0.5秒跳躍→1コマ衝撃','鉄壁':'味方を守る半径3コマの陣','渦巻':'敵に命中後1秒の渦','巨大':'命中で1.2倍巨大化（最大3回）','一撃':'発射中の対敵衝突×2'};
 const $=id=>document.getElementById(id),ctx=$('board').getContext('2d',{alpha:false});
 const {W,H}=P,PI=Math.PI,TAU=PI*2,clamp=P.clamp;
 const scenes=['home','setup','confirm','game','result'];
@@ -60,15 +60,29 @@ function sound(type,magnitude=1){if(!st.sound)return;initAudio();
  if(type==='win'){for(let i=0;i<4;i++)note([392,523,659,784][i],.33,.095,'triangle',i*.09)}
  if(type==='tap')note(450,.06,.035,'triangle',0,580);
 }
-function roulette(){cancelAsync();initAudio();const bits=new Uint32Array(1);try{crypto.getRandomValues(bits)}catch(e){bits[0]=(Math.random()*4294967296)>>>0}const first=bits[0]%2;
- st.phase='roulette';$('roulette').classList.remove('hidden');$('rouletteText').textContent='先攻を決定中…';
- for(let i=0;i<11;i++)later(()=>{$('rouletteText').textContent=i%2?'🔴 赤が先攻？':'🔵 青が先攻？';sound('tap')},i*95);
- later(()=>{$('rouletteText').textContent=(first===0?'🔵 青':'🔴 赤')+'が先攻！';sound('merge')},1130);
- later(()=>startMatch(first),1970);
+function roulette(){
+ cancelAsync();initAudio();const bits=new Uint32Array(1);
+ try{crypto.getRandomValues(bits)}catch(e){bits[0]=(Math.random()*4294967296)>>>0}
+ const sector=bits[0]%4,first=sector%2;
+ st.phase='roulette';$('roulette').classList.remove('hidden');
+ $('rouletteText').textContent='先攻を決定中…';
+ const wheel=$('rouletteWheel');wheel.style.transition='none';wheel.style.transform='rotate(0deg)';
+ // Each of the four colored sectors has exactly 1/4 probability.
+ requestAnimationFrame(()=>requestAnimationFrame(()=>{
+  wheel.style.transition='transform 2.15s cubic-bezier(.16,.76,.14,1)';
+  wheel.style.transform=`rotate(${360*6-sector*90}deg)`;
+ }));
+ for(let i=0;i<10;i++)later(()=>sound('tap'),i*190);
+ later(()=>{$('rouletteText').textContent=(first===0?'🔵 青':'🔴 赤')+'が先攻！';sound('merge')},2240);
+ later(()=>startMatch(first),3000);
 }
+
 function makeNames(){for(let i=0;i<2;i++)$('gameName'+i).textContent=st.names[i]}
-function startMatch(first=null){cancelAsync();st.world=P.newWorld();P.spawnInitial(st.world,st.decks);st.drag=null;st.selected=null;st.fx=[];st.texts=[];st.phase='playing';st.turn=first===null?st.turn:first;st.spin=1;st.hitstop=0;st.shake=0;st.flash=0;st.time=0;st.acc=0;st.moving=0;st.still=0;st.shotCount=0;st.vortexPlayed=false;st.result=null;st.stats={outs:[0,0],merges:[0,0],crits:[0,0],awakens:[0,0]};st._impactTimes=new Map();
+function startMatch(first=null){cancelAsync();st.world=P.newWorld();P.spawnInitial(st.world,st.decks);st.drag=null;st.selected=null;st.fx=[];st.texts=[];st.phase='playing';st.turn=first===null?st.turn:first;st.spin=1;st.hitstop=0;st.shake=0;st.flash=0;st.time=0;st.acc=0;st.moving=0;st.still=0;st.shotCount=0;st.vortexPlayed=false;st.cancelUntil=0;st.result=null;st.stats={outs:[0,0],merges:[0,0],crits:[0,0],awakens:[0,0]};st._impactTimes=new Map();
  $('spinRight').classList.add('active');$('spinLeft').classList.remove('active');makeNames();
+ $('suddenOverlay').classList.add('hidden');$('suddenOverlay').setAttribute('aria-hidden','true');
+ $('effectBanner').classList.add('hidden');$('toast').classList.add('hidden');
+ $('fieldStatus').className='field-status hidden';st.bannerUntil=0;
  changeScene('game');resizeCanvas();updateHud();beginTurn();
 }
 function updateHud(){if(!st.world)return;
@@ -79,9 +93,9 @@ function updateHud(){if(!st.world)return;
 function beginTurn(){if(st.phase==='result'||!st.world)return;st.phase='playing';st.selected=null;st.drag=null;st.spin=1;st.still=0;
  $('spinRight').classList.add('active');$('spinLeft').classList.remove('active');
  $('turnText').textContent=st.turn===0?'🔵 青の番':'🔴 赤の番';
- $('phaseText').textContent=st.mode==='solo'&&st.turn===1?'CPU思考中…':'漢字を弾こう';
+ $('phaseText').textContent=st.world.preparation?`準備フェーズ ${st.world.prepTurns+1}/2 · 能力無効`:(st.world.suddenDeath?'⚠️ サドンデス！':st.mode==='solo'&&st.turn===1?'CPU思考中…':'漢字を弾こう');
  $('selectedLabel').textContent=st.mode==='solo'&&st.turn===1?'CPUが狙っています…':'① 漢字をタップして選択';
- $('hintLabel').textContent='② 好きな場所から逆方向へドラッグ';
+ $('hintLabel').textContent='② 好きな位置からドラッグ／2本指タップで中止';
  $('aimHint').classList.add('hidden');$('spinMeter').textContent='回転力 --';updateFieldStatus();
  const cpu=st.mode==='solo'&&st.turn===1;
  for(const id of ['spinRight','spinLeft'])$(id).disabled=cpu;
@@ -92,31 +106,23 @@ function fireShot(b,dirX,dirY,power,spin,spinStrength=1){if(st.phase!=='playing'
  P.fire(st.world,b,dirX,dirY,power,spin,spinStrength);st.vortexPlayed=false;st.shotCount++;st.phase='moving';st.moving=0;st.still=0;st.acc=0;st.selected=null;st.drag=null;
  $('phaseText').textContent='物理演算中…';$('selectedLabel').textContent=b.text+'、発射！';$('hintLabel').textContent='全コマが止まると交代';
  addParticles(b.x,b.y,10,st.turn===0?'#70c5f7':'#f4a29c',1);st.shake=2.6;sound('shoot');$('aimHint').classList.add('hidden');$('spinMeter').textContent='回転力 --';
- if(b.ability==='shock')showEffect('着弾後2コマ跳躍 → 全方位衝撃！',950);
- if(b.ability==='iron')showEffect('鉄壁：自ターン終了時に護陣！',900);
- if(b.ability==='vortex')showEffect('渦巻：着地後に2周の渦！',950);
- if(b.ability==='giant')showEffect('巨大：敵への命中で巨大化！',800);
- if(b.ability==='strike')showEffect('一撃：敵への吹き飛ばし×2！',800);
+ if(b.ability==='shock'&&!st.world.preparation)showEffect('衝撃：0.5秒ジャンプ → 着地で円形波！',850);
+ if(b.ability==='iron'&&!st.world.preparation)showEffect('鉄壁：自ターン終了時に護陣！',900);
+ if(b.ability==='vortex'&&!st.world.preparation)showEffect('渦巻：敵に命中後、停止時に渦！',850);
+ if(b.ability==='giant'&&!st.world.preparation)showEffect('巨大：敵への命中で巨大化！',800);
+ if(b.ability==='strike'&&!st.world.preparation)showEffect('一撃：敵への吹き飛ばし×2！',800);
  return true;
 }
 function collisionHooks(){return {
  impact:({a,b,p,speed,corner,impulse})=>{
-  // One-off radial shockwave from first collision, with another piece OR a wall.
   const shooter=(a.id===st.world.shooterId?a:b.id===st.world.shooterId?b:null);
-  if(shooter?.shockArmed && shooter.ability==='shock'){
-    const wave=P.triggerShock(st.world,shooter,p);
-    if(wave){st.shake=8;st.hitstop=Math.max(st.hitstop,.065);st.flash=.55;
-      addRing(wave.from.x,wave.from.y,'#a7ffff',90);addRing(wave.x,wave.y,'#e2ffff',P.PIECE_UNIT*2);
-      addParticles(wave.x,wave.y,32,'#82f4ff',1.65);
-      showText('衝撃炸裂!!',wave.x,wave.y,'#d1fbff');showEffect('衝撃・全方位爆発！',1100);sound('shock');}
-  }
   // Collisions may generate adjacent contact manifolds: one SFX per pair / 120 ms.
   const key=a.static?'w'+b.id:b.static?'w'+a.id:[a.id,b.id].sort((x,y)=>x-y).join('_');
   st._impactTimes||=new Map();if((st.world.time-(st._impactTimes.get(key)||-99))<.11)return;
   st._impactTimes.set(key,st.world.time);
   const big=speed>165;
   if(big){addParticles(p.x,p.y,Math.min(18,Math.round(speed/45)),'#fbda92',speed/330);st.shake=Math.max(st.shake,clamp(speed/100,1.5,7.5));}
-  if(shooter&&a.owner!==b.owner&&!a.static&&!b.static){
+  if(!st.world.preparation&&shooter&&a.owner!==b.owner&&!a.static&&!b.static){
     if(shooter.ability==='giant'&&P.growGiant(st.world,shooter)){
      addRing(shooter.x,shooter.y,'#eac864',shooter.radius*1.7);addParticles(shooter.x,shooter.y,23,'#ffd774',1.3);
      st.flash=.20;showText('巨大化 ×'+shooter.growthStacks,shooter.x,shooter.y,'#fff2b4');showEffect('巨大化 '+shooter.growthStacks+'/3 !!',850);sound('merge');
@@ -140,6 +146,13 @@ function collisionHooks(){return {
   addParticles(pos.x,pos.y,20,b.owner===0?'#3989c5':'#d35b58',1.3);st.shake=4.8;showText('場外!!',pos.x,pos.y,'#ffe9bb');sound('out');updateHud();
  },
  ability:(b,name)=>{if(name==='burst'){addRing(b.x,b.y,'#e75552',115);addParticles(b.x,b.y,23,'#f67252',1.4);showText('暴走開始!!',b.x,b.y,'#f9a36d');showEffect('暴走加速!!',900);sound('burst')}},
+ shockLand:(b,wave)=>{
+  if(!wave)return;
+  st.shake=5.5;st.hitstop=Math.max(st.hitstop,.05);st.flash=.32;
+  addRing(wave.x,wave.y,'#a7ffff',P.PIECE_UNIT);
+  addParticles(wave.x,wave.y,20,'#82f4ff',.95);
+  showText('衝撃着地！',wave.x,wave.y,'#dcffff');showEffect('衝撃：着地から1コマ衝撃波！',800);sound('shock');
+ },
  shockHit:(wave,target,impulse)=>{
   addParticles(target.x,target.y,Math.max(5,Math.round(impulse/100)),'#8ddbf3',.65);
   st.shake=Math.max(st.shake,Math.min(5,impulse/200));
@@ -162,29 +175,63 @@ function tickPhysics(dt){if(st.hitstop>0){st.hitstop=Math.max(0,st.hitstop-dt);r
  if(st.moving>.58&&P.allStopped(st.world))st.still+=dt;else st.still=0;
  if(st.still>.48||st.moving>12.5){
    const shooter=st.world.bodies.find(b=>b.id===st.world.shooterId&&b.alive);
-   if(!st.vortexPlayed&&shooter?.ability==='vortex'){
+   if(!st.vortexPlayed&&!st.world.preparation&&shooter?.ability==='vortex'&&shooter.vortexHitEnemy){
     st.vortexPlayed=true;
     const v=P.startVortex(st.world,shooter);
     if(v){
      st.still=0;st.moving=0;st.acc=0;
-     addRing(shooter.x,shooter.y,'#a875ed',180);addParticles(shooter.x,shooter.y,26,'#9c78ef',1.1);
-     showEffect('渦巻・敵を2周巻き込む！',1250);sound('shock');return;
+     addRing(shooter.x,shooter.y,'#a875ed',P.PIECE_UNIT*1.9);addParticles(shooter.x,shooter.y,26,'#9c78ef',1.1);
+     showEffect('渦巻・周囲の全員を1秒旋回！',950);sound('shock');return;
     }
    }
    P.settle(st.world);st.acc=0;finishShot();
  }
 
 }
-function finishShot(){if(!st.world||st.phase!=='moving')return;const n0=P.remaining(st.world,0),n1=P.remaining(st.world,1);
- if(n0===0||n1===0){finishGame(n0===0&&n1===0?-1:n0===0?1:0);return}
- const fields=P.finishTurn(st.world,st.turn);
- if(fields.length){const iron=st.world.bodies.find(b=>b.id===fields[0].sourceId);
-  addRing(iron?.x??W/2,iron?.y??H/2,st.turn===0?'#4faeea':'#ec8077',P.PIECE_UNIT*2);
-  showEffect((st.turn===0?'青':'赤')+'の鉄壁護陣 展開！',950);sound('awake');
+function finishShot(){
+ if(!st.world||st.phase!=='moving')return;
+ const world=st.world,n0=P.remaining(world,0),n1=P.remaining(world,1);
+ if(n0===0||n1===0){finishGame(n0===0&&n1===0?-1:n0===0?1:0);return;}
+ const wasPreparation=world.preparation;
+ if(wasPreparation){
+  world.prepTurns++;
+  if(world.prepTurns>=2){
+   P.openArena(world);showEffect('準備完了！ 場外開放・能力解禁！',1350);
+   addRing(W/2,H/2,'#f0b64f',125);sound('merge');
+  }
+ }else{
+  const fields=P.finishTurn(world,st.turn,true);
+  if(fields.length){const iron=world.bodies.find(b=>b.id===fields[0].sourceId);
+   addRing(iron?.x??W/2,iron?.y??H/2,st.turn===0?'#4faeea':'#ec8077',P.PIECE_UNIT*3);
+   showEffect((st.turn===0?'青':'赤')+'の鉄壁護陣 展開！',800);sound('awake');
+  }
+  if(world.suddenDeath){
+   P.expandGates(world);showEffect(`⚠️ 場外拡大！ ${world.suddenTurns}ターン目`,900);
+   sound('impact');
+  }
  }
- st.turn=1-st.turn;beginTurn();
+ st.turn=1-st.turn;
+ if(!world.preparation&&!world.suddenDeath&&n0===1&&n1===1){
+  world.suddenDeath=true;st.phase='sudden';st.selected=null;st.drag=null;
+  $('suddenOverlay').classList.remove('hidden');
+  $('suddenOverlay').setAttribute('aria-hidden','false');sound('out');
+  updateHud();updateFieldStatus();
+  later(()=>{if(st.scene!=='game'||st.phase!=='sudden')return;
+   $('suddenOverlay').classList.add('hidden');$('suddenOverlay').setAttribute('aria-hidden','true');beginTurn();},2000);
+  return;
+ }
+ beginTurn();
 }
-function updateFieldStatus(){const el=$('fieldStatus');if(!el||!st.world)return;const fields=st.world.fields;el.classList.toggle('hidden',!fields.length);if(fields.length){el.className='field-status '+(fields[0].owner===0?'blue':'red');el.textContent=(fields[0].owner===0?'🔵 青':'🔴 赤')+' 鉄壁護陣：味方への吹き飛ばし ×0.7';}}
+
+function updateFieldStatus(){
+ const el=$('fieldStatus');if(!el||!st.world)return;
+ const w=st.world,fields=w.fields;
+ if(w.preparation){el.className='field-status prep';el.textContent=`準備 ${w.prepTurns+1}/2｜場外・中央封鎖 / 能力OFF`;return;}
+ if(fields.length){el.className='field-status '+(fields[0].owner===0?'blue':'red');el.textContent=(fields[0].owner===0?'🔵 青':'🔴 赤')+' 鉄壁護陣：味方の被弾×0.7・半径3コマ';return;}
+ if(w.suddenDeath){el.className='field-status sudden';el.textContent=`⚠️ サドンデス：場外が毎ターン1コマ拡大（+${w.suddenTurns}）`;return;}
+ el.className='field-status hidden';
+}
+
 function finishGame(winner){cancelAsync();st.phase='result';st.result={winner,turns:st.shotCount,stats:JSON.parse(JSON.stringify(st.stats))};
  $('resultHeadline').classList.toggle('red',winner===1);
  $('resultHeadline').textContent=winner<0?'引き分け！':winner===0?'青の勝利！':'赤の勝利！';
@@ -207,7 +254,7 @@ function cpuTakeTurn(){if(!st.world||st.phase!=='playing'||st.turn!==1||st.mode!
  for(const src of own){
   const sorted=[...enemy].sort((a,b)=>Math.hypot(a.x-src.x,a.y-src.y)-Math.hypot(b.x-src.x,b.y-src.y));
   const ally=own.filter(x=>x!==src&&!x.merged&&!src.merged&&x.word===src.word&&x.text!==src.text);
-  const targets=[...sorted.slice(0,st.diff==='hard'?3:st.diff==='normal'?2:1),...ally.slice(0,1)];
+  const targets=st.world.preparation?ally.slice(0,2):[...sorted.slice(0,st.diff==='hard'?3:st.diff==='normal'?2:1),...ally.slice(0,1)];
   for(const target of targets){
    const base=Math.atan2(target.y-src.y,target.x-src.x);
    const offsets=st.diff==='easy'?[0,.19,-.19]:st.diff==='normal'?[0,-.12,.12]:[0,-.13,.13];
@@ -255,7 +302,7 @@ function startAim(e,b){initAudio();const pos=boardPoint(e);
  $('hintLabel').textContent=`回転力 ${Math.round(strength*100)}% ・逆へ引っ張ろう`;
  $('spinMeter').textContent=`↻↺ 回転力 ${Math.round(strength*100)}%`;
 }
-function pointerDown(e){if(!selectable()||st.drag)return;
+function pointerDown(e){if(Date.now()<(st.cancelUntil||0)||!selectable()||st.drag)return;
  if(e.isPrimary===false||e.button!==undefined&&e.button!==0)return;
  if(e.target.closest('button,input,select,a'))return;
  const pos=boardPoint(e),onCanvas=e.target.id==='board';
@@ -281,8 +328,16 @@ function pointerUp(e){if(!st.drag||st.drag.cpu||e.pointerId!==st.drag.pointer)re
  }else{$('hintLabel').textContent='選択OK！ 好きな場所から大きくドラッグ';}
 }
 function pointerCancel(e){if(st.drag&&!st.drag.cpu&&(!e||e.pointerId===st.drag.pointer)){
- st.drag=null;$('hintLabel').textContent='操作を中断しました。好きな場所から再入力';
+ const pointer=st.drag.pointer;st.drag=null;
+ try{if($('gameScene').hasPointerCapture(pointer))$('gameScene').releasePointerCapture(pointer)}catch(err){}
+ $('hintLabel').textContent='キャンセルしました。好きな場所から再入力';
 }}
+function secondFingerCancel(e){
+ if(!st.drag||st.drag.cpu||e.pointerType!=='touch'||e.pointerId===st.drag.pointer)return;
+ e.preventDefault();st.cancelUntil=Date.now()+400;pointerCancel();
+ toast('2本指タップで発射をキャンセル');
+}
+
 function addRing(x,y,color='#e7c384',size=80){st.fx.push({type:'ring',x,y,color,r:5,max:size,t:0,life:.44})}
 function addParticles(x,y,count,color,energy=1){for(let i=0;i<count&&st.fx.length<260;i++){
  const theta=Math.random()*TAU,speed=(70+Math.random()*245)*energy;
@@ -305,17 +360,39 @@ function makeBoardArt(){const canvas=document.createElement('canvas');canvas.wid
  c.save();c.strokeStyle='#b8a78eaa';c.lineWidth=2;c.setLineDash([6,14]);c.beginPath();c.moveTo(W/2,15);c.lineTo(W/2,H-15);c.stroke();c.restore();
  c.strokeStyle='rgba(255,255,255,.5)';c.lineWidth=3;c.strokeRect(10,10,W-20,H-20);
  c.fillStyle='rgba(39,56,65,.12)';c.font='900 20px sans-serif';c.textAlign='center';c.fillText('紅 の 陣',W/2,45);c.fillText('青 の 陣',W/2,H-25);
- // Exit zones are visually open, with arrowheads pointing outward.
- function gate(x,y,rotation){c.save();c.translate(x,y);c.rotate(rotation);c.fillStyle='#d5686260';c.fillRect(-87,-20,174,26);c.fillStyle='#b34d40';for(let j=-1;j<=1;j++){c.beginPath();c.moveTo(j*42-10,-3);c.lineTo(j*42+10,-3);c.lineTo(j*42,13);c.closePath();c.fill()}
- c.font='950 14px sans-serif';c.fillStyle='#9f3e36';c.fillText('場 外',0,-26);c.restore()}
- gate(W/2,14,PI);gate(W/2,H-14,0);gate(14,H/2,-PI/2);gate(W-14,H/2,PI/2);
- // Eight wall sections (the four central gaps stay open).
- const wx=(W-184)/2,hy=(H-165)/2;
- function wall(x,y,w,h){const g=c.createLinearGradient(x,y,x+w,y+h);g.addColorStop(0,'#4c433a');g.addColorStop(.45,'#665444');g.addColorStop(1,'#342e2a');c.fillStyle=g;c.fillRect(x,y,w,h);
- c.fillStyle='rgba(252,238,202,.27)';c.fillRect(x+3,y+3,Math.max(0,w-6),Math.max(0,h-6));c.fillStyle='rgba(26,31,32,.13)';c.fillRect(x+5,y+5,Math.max(0,w-10),Math.max(0,h-10));}
- wall(0,0,wx,14);wall(W-wx,0,wx,14);wall(0,H-14,wx,14);wall(W-wx,H-14,wx,14);
- wall(0,0,14,hy);wall(0,H-hy,14,hy);wall(W-14,0,14,hy);wall(W-14,H-hy,14,hy);
  artCanvas=canvas;
+}
+function drawArenaGeometry(){
+ const world=st.world;if(!world)return;
+ const prep=world.preparation,gx=prep?0:world.gateX,gy=prep?0:world.gateY;
+ ctx.save();
+ function segment(x,y,w,h){if(w<=0||h<=0)return;
+  const grad=ctx.createLinearGradient(x,y,x+w,y+h);
+  grad.addColorStop(0,'#51473d');grad.addColorStop(.55,'#685747');grad.addColorStop(1,'#37322b');
+  ctx.fillStyle=grad;ctx.fillRect(x,y,w,h);
+  ctx.fillStyle='#fff2ca4d';ctx.fillRect(x+3,y+3,Math.max(0,w-6),Math.max(0,h-6));
+ }
+ const lenX=(W-gx)/2,lenY=(H-gy)/2;
+ segment(0,0,lenX,15);segment(W-lenX,0,lenX,15);
+ segment(0,H-15,lenX,15);segment(W-lenX,H-15,lenX,15);
+ segment(0,0,15,lenY);segment(0,H-lenY,15,lenY);
+ segment(W-15,0,15,lenY);segment(W-15,H-lenY,15,lenY);
+ if(prep){
+  ctx.fillStyle='#102a37b0';ctx.fillRect(0,H/2-10,W,20);
+  ctx.strokeStyle='#e8cc81';ctx.lineWidth=3;ctx.setLineDash([10,7]);
+  ctx.beginPath();ctx.moveTo(20,H/2);ctx.lineTo(W-20,H/2);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle='#fff7da';ctx.textAlign='center';ctx.font='900 19px sans-serif';
+  ctx.fillText('準 備 フ ェ ー ズ',W/2,H/2-16);
+ }else{
+  function gate(x,y,rot,width){ctx.save();ctx.translate(x,y);ctx.rotate(rot);
+   ctx.fillStyle=world.suddenDeath?'#d63e5070':'#d5686265';ctx.fillRect(-width/2,-6,width,11);
+   ctx.textAlign='center';ctx.fillStyle=world.suddenDeath?'#b32e42':'#ab4b3e';
+   ctx.font='900 15px sans-serif';ctx.fillText(world.suddenDeath?'⚠ 場外':'場 外',0,-12);
+   ctx.restore();}
+  gate(W/2,7,Math.PI,gx);gate(W/2,H-7,0,gx);
+  gate(7,H/2,-Math.PI/2,gy);gate(W-7,H/2,Math.PI/2,gy);
+ }
+ ctx.restore();
 }
 function resizeCanvas(){const canvas=$('board'),dpr=Math.min(2,window.devicePixelRatio||1);canvas.width=Math.round(W*dpr);canvas.height=Math.round(H*dpr);
  ctx.setTransform(canvas.width/W,0,0,canvas.height/H,0,0);
@@ -325,7 +402,12 @@ function resizeCanvas(){const canvas=$('board'),dpr=Math.min(2,window.devicePixe
 }
 function drawPiece(b){const color=b.owner===0?'#2473ab':'#c7504f',dark=b.owner===0?'#174766':'#782d30';
  const shine=b.owner===0?'#9fddfa':'#ffd2b9';
- ctx.save();ctx.translate(b.x,b.y);ctx.rotate(b.angle);const scale=b.scale||1;ctx.scale(scale,scale);
+ ctx.save();ctx.translate(b.x,b.y);
+ if(b.jump){const lift=Math.sin(Math.PI*b.jump.age/b.jump.duration)*33;
+  ctx.fillStyle='#0e33402a';ctx.beginPath();ctx.ellipse(0,11,Math.max(15,b.w*.40),Math.max(8,b.h*.18),0,0,TAU);ctx.fill();
+  ctx.translate(0,-lift);ctx.scale(1+lift*.004,1+lift*.004);
+ }
+ ctx.rotate(b.angle);const scale=b.scale||1;ctx.scale(scale,scale);
  if(st.selected===b&&st.phase==='playing'){
  ctx.save();ctx.strokeStyle=b.owner===0?'#2ba5e3':'#d96255';ctx.lineWidth=2;ctx.setLineDash([5,5]);ctx.globalAlpha=.85;
  ctx.beginPath();ctx.ellipse(0,0,b.w*.70+11,b.h*.70+11,0,0,TAU);ctx.stroke();ctx.restore();
@@ -362,7 +444,7 @@ function drawVortices(){
   ctx.strokeStyle=`rgba(138,85,217,${.38+.55*alpha})`;ctx.lineWidth=4;ctx.shadowColor='#a785fa';ctx.shadowBlur=9;
   for(let arm=0;arm<3;arm++){ctx.beginPath();for(let i=0;i<=55;i++){
    const theta=(i/55)*Math.PI*4+arm*2*Math.PI/3+v.age*2;
-   const rad=8+(i/55)*Math.min(230,110+v.expand);
+   const rad=8+(i/55)*Math.min(v.range||117,65+v.expand);
    if(i===0)ctx.moveTo(Math.cos(theta)*rad,Math.sin(theta)*rad);
    else ctx.lineTo(Math.cos(theta)*rad,Math.sin(theta)*rad);
   }ctx.stroke()}
@@ -382,11 +464,16 @@ function drawDrag(){const d=st.drag;if(!d||!d.body||!d.body.alive)return;const l
  ctx.save();ctx.shadowColor='#ffffffb0';ctx.shadowBlur=9;ctx.lineCap='round';ctx.strokeStyle=st.turn===0?'#2887c6':'#d14e4c';ctx.lineWidth=5+4*d.power;
  ctx.beginPath();ctx.moveTo(x+dx*37,y+dy*37);ctx.lineTo(endx,endy);ctx.stroke();
  ctx.fillStyle=st.turn===0?'#2580bd':'#cb4e4b';ctx.beginPath();ctx.moveTo(endx+dx*19,endy+dy*19);ctx.lineTo(endx-dy*13-dx*6,endy+dx*13-dy*6);ctx.lineTo(endx+dy*13-dx*6,endy-dx*13-dy*6);ctx.closePath();ctx.fill();
- ctx.setLineDash([8,9]);ctx.lineWidth=2;ctx.globalAlpha=.7;ctx.beginPath();
- if(d.cpu){ctx.moveTo(x,y);ctx.lineTo(x-dx*Math.min(142,length),y-dy*Math.min(142,length))}
- else{ctx.moveTo(d.start.x,d.start.y);ctx.lineTo(d.current.x,d.current.y)}
- ctx.stroke();
- if(!d.cpu){ctx.setLineDash([]);ctx.beginPath();ctx.arc(d.start.x,d.start.y,7,0,TAU);ctx.fillStyle='#fff';ctx.fill()}
+ // No line back to the finger: display only the shot direction arrow.
+ if(d.body.ability==='shock'&&!st.world.preparation){
+  const px=clamp(x+dx*P.PIECE_UNIT,d.body.w*.65,W-d.body.w*.65);
+  const py=clamp(y+dy*P.PIECE_UNIT,d.body.h*.65,H-d.body.h*.65);
+  ctx.setLineDash([7,5]);ctx.shadowBlur=0;ctx.lineWidth=3;
+  ctx.strokeStyle='#2caac8';ctx.fillStyle='#57d9ee1f';
+  ctx.beginPath();ctx.arc(px,py,P.PIECE_UNIT,0,TAU);ctx.fill();ctx.stroke();
+  ctx.setLineDash([]);ctx.font='900 14px sans-serif';ctx.textAlign='center';
+  ctx.fillStyle='#15718f';ctx.fillText('着地予測',px,clamp(py-P.PIECE_UNIT-10,18,H-20));
+ }
  ctx.restore();
  ctx.textAlign='center';ctx.fillStyle='#293747ed';ctx.font='950 16px system-ui';
  ctx.fillText(Math.round(d.power*100)+'% · 回転 '+Math.round((d.spinStrength||0)*100)+'%',clamp(x,100,W-100),clamp(y-62,34,H-30));
@@ -416,7 +503,7 @@ function paint(dt){if(!st.world||st.scene!=='game')return;
  ctx.setTransform($('board').width/W,0,0,$('board').height/H,0,0);ctx.clearRect(0,0,W,H);
  ctx.save();if(st.shake>.1)ctx.translate((Math.random()-.5)*st.shake*1.2,(Math.random()-.5)*st.shake*1.2);
  ctx.drawImage(artCanvas,0,0,W,H);
- drawFields();drawVortices();drawTrails(dt);
+ drawArenaGeometry();drawFields();drawVortices();drawTrails(dt);
  for(const b of st.world.bodies)if(b.alive){drawPiece(b)}
  drawDrag();drawOverlays();
  if(st.flash>0){ctx.fillStyle=`rgba(255,250,214,${st.flash*.48})`;ctx.fillRect(0,0,W,H)}
@@ -439,6 +526,7 @@ $('spinRight').addEventListener('click',()=>{st.spin=1;$('spinRight').classList.
 $('spinLeft').addEventListener('click',()=>{st.spin=-1;$('spinLeft').classList.add('active');$('spinRight').classList.remove('active');sound('tap')});
 // Use the entire game scene as an aim surface, not only the canvas.
 // Capturing at scene level preserves the drag if a finger crosses its edge.
+window.addEventListener('pointerdown',secondFingerCancel,{capture:true,passive:false});
 $('gameScene').addEventListener('pointerdown',pointerDown);
 $('gameScene').addEventListener('pointermove',pointerMove);
 $('gameScene').addEventListener('pointerup',pointerUp);
@@ -447,7 +535,7 @@ $('gameScene').addEventListener('lostpointercapture',e=>{if(st.drag&&e.pointerId
 $('quitBtn').addEventListener('click',()=>{onModal(`<p><b>対戦を終了しますか？</b></p><p>この対戦の進行状況は保存されません。</p><button type="button" class="ghost-btn" id="endMatch">対戦を終了してタイトルへ戻る</button>`,'対戦を終了');$('endMatch').addEventListener('click',()=>{cancelAsync();st.phase='title';changeScene('home')})});
 $('rematchBtn').addEventListener('click',()=>{const bits=new Uint32Array(1);try{crypto.getRandomValues(bits)}catch(e){bits[0]=Math.floor(Math.random()*2)};startMatch(bits[0]%2)});
 $('resultHomeBtn').addEventListener('click',()=>{cancelAsync();st.phase='title';changeScene('home')});
-$('helpBtn').addEventListener('click',()=>onModal(`<p><b>① 漢字を選んで、どこからでも弾く</b><br>自分の漢字をタップ→盤面の好きな場所（盤面の外側でもOK）からドラッグ。逆方向へ引っ張って指を離すと発射。漢字から離れた地点ほど強回転！</p><p><b>② 熟語合体</b><br>2文字がぶつかると合体。暴走・衝撃・鉄壁・渦巻・巨大・一撃の6能力から3つ選べます。</p><p><b>③ 特殊能力</b><br>暴走：いったん止まったら3秒間、最寄りの敵を追尾。<br>衝撃：最初の接触で2コマ分跳躍し、半径2コマの全方位爆風。自分も巻き込まれます。<br>鉄壁：自分のターン終了時、周辺2コマ分の青/赤防御フィールドを展開。内側の味方の被弾×0.7、相手ターン終了時に消滅。<br>渦巻：移動終了後、近くの敵を2周の外向きの渦へ巻き込む。<br>巨大：敵に当てるたび1.2倍大きく、攻撃力1.1倍ずつ（最大3回、試合中永続）。<br>一撃：発射中に敵に当たると衝突力×2。</p><p><b>④ 覚醒</b><br>残り1コマが未合体なら元の熟語に覚醒します。</p><p><b>⑤ 勝利</b><br>四辺中央の場外口から相手を全部落とす。角当てでCRITICAL ×1.2！</p>`, '遊びかた'));
+$('helpBtn').addEventListener('click',()=>onModal(`<p><b>① 漢字を選んで、どこからでも弾く</b><br>自分の漢字をタップ→盤面の好きな場所（外側でもOK）からドラッグ。矢印方向へ飛び、指を離すと発射。漢字から遠い位置で始めると強回転。引っ張り中の2本指目タップでキャンセル。</p><p><b>② 熟語合体</b><br>2文字がぶつかると合体。暴走・衝撃・鉄壁・渦巻・巨大・一撃の6能力から3つ選べます。</p><p><b>③ 特殊能力</b><br>暴走：いったん止まったら1秒間、最寄りの敵を追尾。<br>衝撃：発射すると0.5秒で1コマジャンプし、半径1コマの通常威力の円形衝撃波。着地点をガイドで表示。<br>鉄壁：本体は被弾×0.6、自ターン終了後に半径3コマの青/赤防御フィールドを展開。味方の被弾×0.7、相手ターン後に消滅。<br>渦巻：敵に命中した発射の停止後、1秒間の渦を展開。触れた味方・敵に効果。範囲は旧版の半分。<br>巨大：敵に当てるたび1.2倍大きく、攻撃力1.1倍ずつ（最大3回、試合中永続）。<br>一撃：発射中に敵に当たると衝突力×2。</p><p><b>④ 覚醒</b><br>残り1コマが未合体なら元の熟語に覚醒。両陣営1コマずつでサドンデスとなり、毎ターン場外幅が1コマ拡大します。</p><p><b>⑤ 勝利</b><br>最初の2ターンは中央と場外を封鎖し、能力は無効（合体は可能）。その後は四辺中央の場外口から相手を全部落とす。角当てでCRITICAL ×1.2！</p>`, '遊びかた'));
 $('modalClose').addEventListener('click',closeModal);$('modalOK').addEventListener('click',closeModal);$('modal').addEventListener('click',e=>{if(e.target===$('modal'))closeModal()});
 $('soundBtn').addEventListener('click',()=>{st.sound=!st.sound;$('soundBtn').classList.toggle('muted',!st.sound);$('soundBtn').textContent=st.sound?'♪':'×';if(st.sound){initAudio();sound('tap')}save()});
 $('soundBtn').classList.toggle('muted',!st.sound);$('soundBtn').textContent=st.sound?'♪':'×';

@@ -1,4 +1,4 @@
-/* 漢字おはじき Ver.1.2: dependency-free 2D compound-SAT impulse solver.
+/* 漢字おはじき Ver.1.3: dependency-free 2D compound-SAT impulse solver.
    World units: board coordinates 540 x 760. Time: seconds. Clockwise rotation is positive.
    Runs physics at a fixed 1/120 second timestep in game.js, render separately.
 */
@@ -45,15 +45,35 @@ function body({x,y,text,owner,word,merged=false,angle=0,vx=0,vy=0,omega=0}){
  const s=shapeFor(text),ability=merged?(WORDS[word]?.ability||null):null;
  const mass=merged?2.1:1;
  const inertia=mass*(s.w*s.w+s.h*s.h)/12;
- return {id:idSeq++,text,word,owner,merged,ability,x,y,vx,vy,angle,omega,mass,invM:1/mass,invI:1/inertia,w:s.w,h:s.h,parts:s.parts,radius:hypot(s.w,s.h)*.58+6,scale:1,growthStacks:0,lastGrowthTime:-100,shotDir:{x:1,y:0},burstAge:null,burstStage:null,homingLeft:0,burstFired:false,shockArmed:false,vortexArmed:false,vortexTriggered:false,awakened:false,awakenAt:-1,alive:true,merging:false,trail:[],trailTime:0,shotAt:-100,flash:0};
+ return {id:idSeq++,text,word,owner,merged,ability,x,y,vx,vy,angle,omega,mass,invM:1/mass,invI:1/inertia,w:s.w,h:s.h,parts:s.parts,radius:hypot(s.w,s.h)*.58+6,scale:1,growthStacks:0,lastGrowthTime:-100,shotDir:{x:1,y:0},burstAge:null,burstStage:null,homingLeft:0,burstFired:false,shockArmed:false,vortexArmed:false,vortexTriggered:false,awakened:false,awakenAt:-1,alive:true,merging:false,trail:[],trailTime:0,shotAt:-100,flash:0,jump:null,vortexHitEnemy:false};
 }
 function staticRect(x,y,w,h){return {id:'wall',owner:-1,x,y,angle:0,vx:0,vy:0,omega:0,invM:0,invI:0,mass:Infinity,parts:[{x:0,y:0,w,h}],radius:hypot(w,h)/2,alive:true,static:true};}
-function walls(){const t=22,gx=184,gy=165;return [
- staticRect((W-gx)/4,-10,(W-gx)/2,28),staticRect(W-(W-gx)/4,-10,(W-gx)/2,28),
- staticRect((W-gx)/4,H+10,(W-gx)/2,28),staticRect(W-(W-gx)/4,H+10,(W-gx)/2,28),
- staticRect(-10,(H-gy)/4,28,(H-gy)/2),staticRect(-10,H-(H-gy)/4,28,(H-gy)/2),
- staticRect(W+10,(H-gy)/4,28,(H-gy)/2),staticRect(W+10,H-(H-gy)/4,28,(H-gy)/2)
- ];}
+function walls(gx=184,gy=165,preparation=false){
+ if(preparation)return [
+  staticRect(W/2,-10,W+28,28),staticRect(W/2,H+10,W+28,28),
+  staticRect(-10,H/2,28,H+28),staticRect(W+10,H/2,28,H+28),
+  // The two-turn preparation phase has an impenetrable midcourt barrier.
+  staticRect(W/2,H/2,W+28,20)
+ ];
+ const spanX=(W-gx)/2,spanY=(H-gy)/2;
+ return [
+  staticRect(spanX/2,-10,spanX,28),staticRect(W-spanX/2,-10,spanX,28),
+  staticRect(spanX/2,H+10,spanX,28),staticRect(W-spanX/2,H+10,spanX,28),
+  staticRect(-10,spanY/2,28,spanY),staticRect(-10,H-spanY/2,28,spanY),
+  staticRect(W+10,spanY/2,28,spanY),staticRect(W+10,H-spanY/2,28,spanY)
+ ];
+}
+function openArena(world){world.preparation=false;world.walls=walls(world.gateX,world.gateY,false);world.fields.length=0}
+function expandGates(world){
+ if(!world.suddenDeath||world.preparation)return false;
+ world.suddenTurns++;
+ const prevX=world.gateX,prevY=world.gateY;
+ world.gateX=Math.min(W-44,world.gateX+PIECE_UNIT);
+ world.gateY=Math.min(H-44,world.gateY+PIECE_UNIT);
+ world.walls=walls(world.gateX,world.gateY,false);
+ return world.gateX!==prevX||world.gateY!==prevY;
+}
+
 function points(b,part){const co=Math.cos(b.angle),si=Math.sin(b.angle),cx=b.x+part.x*co-part.y*si,cy=b.y+part.x*si+part.y*co;
  const wx=part.w/2,hy=part.h/2;
  return [{x:cx-wx*co+hy*si,y:cy-wx*si-hy*co},{x:cx+wx*co+hy*si,y:cy+wx*si-hy*co},
@@ -92,14 +112,17 @@ function fieldPosition(world,f){
  return anchor?{x:anchor.x,y:anchor.y}:f;
 }
 function defenseFactor(world,b){
- if(!world||!world.fields||b.static||!b.alive)return 1;
+ if(!world||world.preparation||b.static||!b.alive)return 1;
+ // The iron tile itself is 0.1 more resistant than the former 0.7 field.
+ let factor=b.ability==='iron'?.6:1;
  for(const f of world.fields){
   if(f.owner!==b.owner)continue;
   const pt=fieldPosition(world,f);
-  if(hypot(b.x-pt.x,b.y-pt.y)<=f.radius)return .7;
+  if(hypot(b.x-pt.x,b.y-pt.y)<=f.radius)factor=Math.min(factor,.7);
  }
- return 1;
+ return factor;
 }
+
 function applyImpulse(world,b,ix,iy,r,sign=1){if(b.static)return;
  const guard=defenseFactor(world,b);b.vx+=ix*b.invM*sign*guard;b.vy+=iy*b.invM*sign*guard;
  b.omega+=cross(r,{x:ix,y:iy})*b.invI*sign*guard;
@@ -124,8 +147,9 @@ function resolve(world,a,b,m,step,onImpact,attacker){
  const isEnemy=!a.static&&!b.static&&a.owner!==b.owner;
  const corner= !!(isEnemy&&attacker&&contactSpeed>165&&isCorner(attacker,p));
  const restitution=(a.static||b.static)?0.64:0.73;
- const skill=(isEnemy&&attacker&&!attacker.static&&attacker.id===world.shooterId)
+ const skill=(!world.preparation&&isEnemy&&attacker&&!attacker.static&&attacker.id===world.shooterId)
    ?attacker.ability==='strike'?2:attacker.ability==='giant'?Math.pow(1.1,Math.min(3,attacker.growthStacks+1)):1:1;
+ if(!world.preparation&&isEnemy&&attacker&&attacker.ability==='vortex'&&attacker.id===world.shooterId&&contactSpeed>60)attacker.vortexHitEnemy=true;
  const impact=Math.min(6000,(-(1+restitution)*vn/denom)*(corner?1.2:1)*skill);
  const imp={x:n.x*impact,y:n.y*impact};
  applyImpulse(world,a,imp.x,imp.y,rA,-1);applyImpulse(world,b,imp.x,imp.y,rB,1);
@@ -143,15 +167,25 @@ function resolve(world,a,b,m,step,onImpact,attacker){
 function step(world,dt,hooks={}){
  const bodies=world.bodies,staticWalls=world.walls;world.time+=dt;
  for(const b of bodies){if(!b.alive||b.merging)continue;
-  // 暴走: wait for the first glide to stop, then home for three full seconds.
-  if(b.ability==='burst'&&b.burstStage==='coast'){
+  // Shock flies over the board for 0.5 s, without a collision during the jump.
+  if(b.jump){
+   b.jump.age=Math.min(b.jump.duration,b.jump.age+dt);
+   const t=b.jump.age/b.jump.duration;
+   b.x=b.jump.from.x+(b.jump.to.x-b.jump.from.x)*t;
+   b.y=b.jump.from.y+(b.jump.to.y-b.jump.from.y)*t;
+   b.omega*=Math.exp(-2*dt);b.angle+=b.omega*dt;
+   if(t>=1){b.jump=null;b.vx=0;b.vy=0;const wave=triggerShock(world,b);hooks.shockLand?.(b,wave);}
+   else continue;
+  }
+  // 暴走: wait for the first glide to stop, then home for one second.
+  if(!world.preparation&&b.ability==='burst'&&b.burstStage==='coast'){
    b.burstAge+=dt;
    if(b.burstAge>.28&&hypot(b.vx,b.vy)<16){
     const nearest=nearestEnemy(world,b);
-    if(nearest){b.burstStage='homing';b.homingLeft=3.0;b.burstFired=true;hooks.ability?.(b,'burst');}
+    if(nearest){b.burstStage='homing';b.homingLeft=1.0;b.burstFired=true;hooks.ability?.(b,'burst');}
     else b.burstStage='done';
    }
-  }else if(b.ability==='burst'&&b.burstStage==='homing'){
+  }else if(!world.preparation&&b.ability==='burst'&&b.burstStage==='homing'){
    const nearest=nearestEnemy(world,b);
    if(nearest){
     const dx=nearest.x-b.x,dy=nearest.y-b.y,dist=hypot(dx,dy)||1;
@@ -162,16 +196,23 @@ function step(world,dt,hooks={}){
    b.homingLeft-=dt;
    if(b.homingLeft<=0)b.burstStage='done';
   }
-  // 渦巻: exactly two spiralling revolutions after the initial shot has stopped.
+  // The vortex pulls in ANY nearby tiles, including allies, when its ring touches them.
   for(const v of world.vortices){
-   const t=v.targets.find(t=>t.id===b.id);if(!t)continue;
+   if(b.id===v.sourceId)continue;
+   let t=v.targets.find(t=>t.id===b.id);
+   if(!t&&hypot(b.x-v.center.x,b.y-v.center.y)<=v.range){
+    t={id:b.id,angle:Math.atan2(b.y-v.center.y,b.x-v.center.x)-4*Math.PI*v.age/v.duration,
+      radius:Math.max(18,hypot(b.x-v.center.x,b.y-v.center.y)-v.expand*v.age/v.duration)};
+    v.targets.push(t);
+   }
+   if(!t)continue;
    const phase=clamp(v.age/v.duration,0,1),ang=t.angle+2*Math.PI*2*phase;
    const radius=t.radius+v.expand*phase;
    const cx=v.center.x,cy=v.center.y;
    const px=cx+Math.cos(ang)*radius,py=cy+Math.sin(ang)*radius;
    const w=4*Math.PI/v.duration,vr=v.expand/v.duration;
    const vx=vr*Math.cos(ang)-radius*w*Math.sin(ang),vy=vr*Math.sin(ang)+radius*w*Math.cos(ang);
-   const bias=0.70,guard=defenseFactor(world,b);
+   const bias=0.55,guard=defenseFactor(world,b);
    b.vx+=clamp((px-b.x)*7+vx-b.vx,-2000,2000)*Math.min(1,dt*8)*bias*guard;
    b.vy+=clamp((py-b.y)*7+vy-b.vy,-2000,2000)*Math.min(1,dt*8)*bias*guard;
    break;
@@ -199,17 +240,17 @@ function step(world,dt,hooks={}){
     const dx=target.x-wave.x,dy=target.y-wave.y,dist=hypot(dx,dy);
     if(dist > wave.radius+target.radius*.23)continue;
     wave.hit.add(target.id);
-    // The blast can affect BOTH teams: aiming is tactical, friendly fire is possible.
-    const falloff=1-.38*clamp(dist/wave.maxRadius,0,1);
+    // Normal-contact strength rather than a screen-clearing blast; affects both teams.
+    const falloff=1-.25*clamp(dist/wave.maxRadius,0,1);
     const guard=defenseFactor(world,target);
-    const impulse=Math.max(500,(wave.maxRadius-dist+target.radius*.25)*10)*falloff*guard/Math.sqrt(target.mass);
+    const impulse=290*falloff*guard/Math.sqrt(target.mass);
     const nx=dist>1?dx/dist:wave.jumpDir.x,ny=dist>1?dy/dist:wave.jumpDir.y;
     target.vx+=nx*impulse;target.vy+=ny*impulse;
-    target.omega+=((target.id%2)?1:-1)*(2.1*falloff)*guard;
+    target.omega+=((target.id%2)?1:-1)*(.65*falloff)*guard;
     target.flash=Math.max(target.flash,.5);
     hooks.shockHit?.(wave,target,impulse);
    }
-   if(wave.age>Math.max(.48,wave.maxRadius/wave.speed+.15))world.shocks.splice(i,1);
+   if(wave.age>Math.max(.37,wave.maxRadius/wave.speed+.15))world.shocks.splice(i,1);
   }
  }
  for(let i=world.vortices.length-1;i>=0;i--){
@@ -219,9 +260,9 @@ function step(world,dt,hooks={}){
  const merges=[];
  for(let pass=0;pass<2;pass++){
   for(let i=0;i<bodies.length;i++){
-   const a=bodies[i];if(!a.alive||a.merging)continue;
+   const a=bodies[i];if(!a.alive||a.merging||a.jump)continue;
    for(let j=i+1;j<bodies.length;j++){
-    const b=bodies[j];if(!b.alive||b.merging)continue;
+    const b=bodies[j];if(!b.alive||b.merging||b.jump)continue;
     const m=manifold(a,b);if(!m)continue;
     const rel=hypot(a.vx-b.vx,a.vy-b.vy);
     if(!a.merged&&!b.merged&&a.word===b.word&&a.text!==b.text&&rel>=55){
@@ -231,7 +272,7 @@ function step(world,dt,hooks={}){
     resolve(world,a,b,m,world.time,pass===0?hooks.impact:null,attacker);
    }
   }
-  for(const a of bodies){if(!a.alive||a.merging)continue;
+  for(const a of bodies){if(!a.alive||a.merging||a.jump)continue;
    for(const wall of staticWalls){
     if(Math.abs(a.x-wall.x)>a.radius+wall.parts[0].w/2||Math.abs(a.y-wall.y)>a.radius+wall.parts[0].h/2)continue;
     const m=manifold(a,wall);
@@ -243,11 +284,11 @@ function step(world,dt,hooks={}){
  // A piece exits only after its center has crossed outside one of four wall gaps.
  for(const b of bodies){if(!b.alive||b.merging)continue;
    const out=(b.x < -b.w*.4 || b.x>W+b.w*.4 || b.y< -b.h*.4 || b.y>H+b.h*.4);
-   if(out){b.alive=false;hooks.out?.(b)}
+   if(out&&!world.preparation){b.alive=false;hooks.out?.(b)}
  }
  // The LAST unmerged character automatically awakens into its intended two-kanji word.
  // Apply once after all KOs for this simulation step; do not create a piece for a defeated team.
- if(remaining(world,0)>0 && remaining(world,1)>0){
+ if(!world.preparation&&remaining(world,0)>0 && remaining(world,1)>0){
   for(let owner=0;owner<2;owner++){
    if(world.awakenedOwners.has(owner))continue;
    const left=bodies.filter(b=>b.alive&&b.owner===owner);
@@ -259,15 +300,18 @@ function step(world,dt,hooks={}){
  }
  return world;
 }
-function newWorld(){return {w:W,h:H,time:0,bodies:[],walls:walls(),shocks:[],vortices:[],fields:[],awakenedOwners:new Set(),shooterId:null,lastShooterOwner:0,shotTime:0};}
+function newWorld(){return {w:W,h:H,time:0,bodies:[],preparation:true,prepTurns:0,
+ gateX:184,gateY:165,suddenDeath:false,suddenTurns:0,walls:walls(184,165,true),
+ shocks:[],vortices:[],fields:[],awakenedOwners:new Set(),shooterId:null,lastShooterOwner:0,shotTime:0};}
 function nearestEnemy(world,b){let nearest=null,best=Infinity;for(const p of world.bodies){if(!p.alive||p.owner===b.owner||p.id===b.id)continue;const d=hypot(p.x-b.x,p.y-b.y);if(d<best){best=d;nearest=p}}return nearest}
-function finishTurn(world,owner){
+function finishTurn(world,owner,allowAbility=true){
  // A field persists throughout the OPPONENT's entire next turn, never more.
  // Remove the previous player's field; a fresh field may now be deployed.
  world.fields=[];
+ if(world.preparation||!allowAbility)return world.fields;
  for(const b of world.bodies){
   if(!b.alive||b.owner!==owner||b.ability!=='iron')continue;
-  world.fields.push({owner:b.owner,sourceId:b.id,x:b.x,y:b.y,radius:PIECE_UNIT*2});
+  world.fields.push({owner:b.owner,sourceId:b.id,x:b.x,y:b.y,radius:PIECE_UNIT*3});
  }
  return world.fields;
 }
@@ -288,7 +332,7 @@ function retargetVortices(world,retiredIds,replacement){
  for(const vortex of world.vortices){
   const old=vortex.targets.find(t=>retiredIds.includes(t.id));if(!old)continue;
   vortex.targets=vortex.targets.filter(t=>!retiredIds.includes(t.id));
-  if(!vortex.targets.some(t=>t.id===replacement.id)&&replacement.owner!==vortex.owner){
+  if(!vortex.targets.some(t=>t.id===replacement.id)&&replacement.id!==vortex.sourceId){
    vortex.targets.push({id:replacement.id,
     angle:Math.atan2(replacement.y-vortex.center.y,replacement.x-vortex.center.x)-4*Math.PI*vortex.age/vortex.duration,
     radius:Math.max(22,hypot(replacement.x-vortex.center.x,replacement.y-vortex.center.y)-vortex.expand*vortex.age/vortex.duration)});
@@ -296,12 +340,12 @@ function retargetVortices(world,retiredIds,replacement){
  }
 }
 function startVortex(world,b){
- if(!b||!b.alive||b.ability!=='vortex'||!b.vortexArmed||b.vortexTriggered)return null;
+ if(world.preparation||!b||!b.alive||b.ability!=='vortex'||!b.vortexArmed||!b.vortexHitEnemy||b.vortexTriggered)return null;
  b.vortexArmed=false;b.vortexTriggered=true;
- const targets=world.bodies.filter(p=>p.alive&&p.owner!==b.owner&&hypot(p.x-b.x,p.y-b.y)<=235)
- .map(p=>({id:p.id,angle:Math.atan2(p.y-b.y,p.x-b.x),radius:Math.max(28,hypot(p.x-b.x,p.y-b.y))}));
- if(!targets.length)return null;
- const v={sourceId:b.id,owner:b.owner,center:{x:b.x,y:b.y},age:0,duration:2.3,expand:95,targets};
+ const range=235/2;
+ const targets=world.bodies.filter(p=>p.alive&&p.id!==b.id&&hypot(p.x-b.x,p.y-b.y)<=range)
+ .map(p=>({id:p.id,angle:Math.atan2(p.y-b.y,p.x-b.x),radius:Math.max(18,hypot(p.x-b.x,p.y-b.y))}));
+ const v={sourceId:b.id,owner:b.owner,center:{x:b.x,y:b.y},age:0,duration:1.0,expand:46,range,targets};
  world.vortices.push(v);return v;
 }
 function spawnInitial(world,decks){
@@ -322,13 +366,25 @@ function fire(world,b,dx,dy,power,spin,spinStrength=1){
  // Spin strength is proportional to distance from piece to gesture START.
  const spinPower=clamp(spinStrength,0,1);
  b.omega=spin*(6.4+12.0*amount)*(.28+.72*spinPower);
- b.isLaunched=true;b.shotAt=world.time;b.shotDir={x:dx/len,y:dy/len};b.burstAge=b.ability==='burst'?0:null;b.burstStage=b.ability==='burst'?'coast':null;b.homingLeft=0;b.burstFired=false;
- b.shockArmed=b.ability==='shock';b.vortexArmed=b.ability==='vortex';b.vortexTriggered=false;
+ b.isLaunched=true;b.shotAt=world.time;b.shotDir={x:dx/len,y:dy/len};
+ b.burstAge=!world.preparation&&b.ability==='burst'?0:null;
+ b.burstStage=!world.preparation&&b.ability==='burst'?'coast':null;
+ b.homingLeft=0;b.burstFired=false;
+ b.shockArmed=!world.preparation&&b.ability==='shock';
+ b.vortexArmed=!world.preparation&&b.ability==='vortex';b.vortexTriggered=false;b.vortexHitEnemy=false;
+ b.jump=null;
+ if(b.shockArmed){
+  const from={x:b.x,y:b.y},to={x:clamp(b.x+b.shotDir.x*PIECE_UNIT,b.w*.65,W-b.w*.65),
+   y:clamp(b.y+b.shotDir.y*PIECE_UNIT,b.h*.65,H-b.h*.65)};
+  b.vx=0;b.vy=0;
+  b.jump={from,to,age:0,duration:.5};
+ }
+
  world.shooterId=b.id;world.lastShooterOwner=b.owner;world.shotTime=world.time;
  return speed;
 }
-function settle(world){for(const b of world.bodies){b.vx=0;b.vy=0;b.omega=0;b.isLaunched=false;b.burstAge=null;b.burstStage=null;b.homingLeft=0;b.shockArmed=false;b.vortexArmed=false;b.trail=[]}world.shocks.length=0;world.vortices.length=0;}
-function allStopped(world){return !world.shocks.length&&!world.vortices.length&&!world.bodies.some(b=>b.alive&&(b.burstStage==='coast'||b.burstStage==='homing'))&&world.bodies.filter(b=>b.alive&&!b.merging).every(b=>hypot(b.vx,b.vy)<10&&Math.abs(b.omega)<.17)}
+function settle(world){for(const b of world.bodies){b.vx=0;b.vy=0;b.omega=0;b.isLaunched=false;b.burstAge=null;b.burstStage=null;b.homingLeft=0;b.shockArmed=false;b.vortexArmed=false;b.vortexHitEnemy=false;b.jump=null;b.trail=[]}world.shocks.length=0;world.vortices.length=0;}
+function allStopped(world){return !world.shocks.length&&!world.vortices.length&&!world.bodies.some(b=>b.alive&&(b.burstStage==='coast'||b.burstStage==='homing'||b.jump))&&world.bodies.filter(b=>b.alive&&!b.merging).every(b=>hypot(b.vx,b.vy)<10&&Math.abs(b.omega)<.17)}
 function createMerged(world,a,b){
  const mass=a.mass+b.mass;
  const x=(a.x*a.mass+b.x*b.mass)/mass,y=(a.y*a.mass+b.y*b.mass)/mass;
@@ -347,17 +403,17 @@ function createMerged(world,a,b){
  world.bodies.push(newB);retargetVortices(world,[a.id,b.id],newB);return newB;
 }
 function remaining(world,owner){return world.bodies.filter(b=>b.alive&&b.owner===owner).length}
-function triggerShock(world,attacker,point){
- if(!attacker||!attacker.alive||!attacker.shockArmed||attacker.id!==world.shooterId||attacker.ability!=='shock')return null;
+function triggerShock(world,attacker){
+ if(world.preparation||!attacker||!attacker.alive||!attacker.shockArmed||attacker.id!==world.shooterId)return null;
  attacker.shockArmed=false;
- const from={x:attacker.x,y:attacker.y},dir=attacker.shotDir;
- // Jump 2 piece diameters toward the shot destination, then emit a 2-piece-radius blast.
- const jump=2*PIECE_UNIT;
- attacker.x=clamp(attacker.x+dir.x*jump,attacker.w*.48,W-attacker.w*.48);
- attacker.y=clamp(attacker.y+dir.y*jump,attacker.h*.48,H-attacker.h*.48);
- const wave={x:attacker.x,y:attacker.y,from,owner:attacker.owner,sourceId:attacker.id,jumpDir:{...dir},age:0,radius:0,maxRadius:2*PIECE_UNIT,speed:600,hit:new Set()};
+ return spawnShockWave(world,attacker);
+}
+function spawnShockWave(world,attacker){
+ const wave={x:attacker.x,y:attacker.y,owner:attacker.owner,sourceId:attacker.id,
+  jumpDir:{...attacker.shotDir},age:0,radius:0,maxRadius:PIECE_UNIT,speed:380,hit:new Set([attacker.id])};
  world.shocks.push(wave);return wave;
 }
+
 function awakenPiece(world,old){
  const result=body({x:old.x,y:old.y,vx:old.vx,vy:old.vy,omega:old.omega,angle:old.angle,
   text:old.word,word:old.word,owner:old.owner,merged:true});
@@ -385,14 +441,17 @@ function evaluateShot(world, shooter,dir,power,spin){
  for(let stepN=0;stepN<95;stepN++){
   const dt=1/55;t+=dt;
   for(const b of bs){if(!b.alive)continue;
-   if(shooter.ability==='burst'&&b.src&&t>1&&t<3){const enemy=bs.filter(e=>e.alive&&e.owner!==b.owner).sort((p,q)=>hypot(p.x-b.x,p.y-b.y)-hypot(q.x-b.x,q.y-b.y))[0];if(enemy){const d=hypot(enemy.x-b.x,enemy.y-b.y)||1;b.vx+=(enemy.x-b.x)/d*400*dt;b.vy+=(enemy.y-b.y)/d*400*dt;}}
+   if(!world.preparation&&shooter.ability==='burst'&&b.src&&t>1&&t<2){const enemy=bs.filter(e=>e.alive&&e.owner!==b.owner).sort((p,q)=>hypot(p.x-b.x,p.y-b.y)-hypot(q.x-b.x,q.y-b.y))[0];if(enemy){const d=hypot(enemy.x-b.x,enemy.y-b.y)||1;b.vx+=(enemy.x-b.x)/d*400*dt;b.vy+=(enemy.y-b.y)/d*400*dt;}}
    if(b.src){const s=spin*.025;b.vx+=-b.vy*s*dt;b.vy+=b.vx*s*dt;}
    b.vx*=Math.exp(-2*dt);b.vy*=Math.exp(-2*dt);b.x+=b.vx*dt;b.y+=b.vy*dt;
-   if(b.x-b.r<0&&!(Math.abs(b.y-H/2)<82)&&b.vx<0){b.x=b.r;b.vx=Math.abs(b.vx)*.65}
-   if(b.x+b.r>W&&!(Math.abs(b.y-H/2)<82)&&b.vx>0){b.x=W-b.r;b.vx=-Math.abs(b.vx)*.65}
-   if(b.y-b.r<0&&!(Math.abs(b.x-W/2)<92)&&b.vy<0){b.y=b.r;b.vy=Math.abs(b.vy)*.65}
-   if(b.y+b.r>H&&!(Math.abs(b.x-W/2)<92)&&b.vy>0){b.y=H-b.r;b.vy=-Math.abs(b.vy)*.65}
-   if(b.x<-b.r||b.x>W+b.r||b.y<-b.r||b.y>H+b.r)b.alive=false;
+   if(b.x-b.r<0&&(world.preparation||!(Math.abs(b.y-H/2)<world.gateY/2))&&b.vx<0){b.x=b.r;b.vx=Math.abs(b.vx)*.65}
+   if(b.x+b.r>W&&(world.preparation||!(Math.abs(b.y-H/2)<world.gateY/2))&&b.vx>0){b.x=W-b.r;b.vx=-Math.abs(b.vx)*.65}
+   if(b.y-b.r<0&&(world.preparation||!(Math.abs(b.x-W/2)<world.gateX/2))&&b.vy<0){b.y=b.r;b.vy=Math.abs(b.vy)*.65}
+   if(b.y+b.r>H&&(world.preparation||!(Math.abs(b.x-W/2)<world.gateX/2))&&b.vy>0){b.y=H-b.r;b.vy=-Math.abs(b.vy)*.65}
+   if(world.preparation){
+    const crossLine=b.owner===0?b.y-b.r<H/2+11:b.y+b.r>H/2-11;
+    if(crossLine){b.y=b.owner===0?H/2+11+b.r:H/2-11-b.r;b.vy*=-.65;}
+   }else if(b.x<-b.r||b.x>W+b.r||b.y<-b.r||b.y>H+b.r)b.alive=false;
   }
   for(let i=0;i<bs.length;i++)for(let j=i+1;j<bs.length;j++){
    const a=bs[i],b=bs[j];if(!a.alive||!b.alive)continue;
@@ -401,8 +460,8 @@ function evaluateShot(world, shooter,dir,power,spin){
    a.x-=nx*overlap*.5;b.x+=nx*overlap*.5;a.y-=ny*overlap*.5;b.y+=ny*overlap*.5;
    const rv=(b.vx-a.vx)*nx+(b.vy-a.vy)*ny;if(rv<0){let impulse=-(1+.7)*rv/(1/a.m+1/b.m);
     if((a.src||b.src)&&a.owner!==b.owner){
-     if(shooter.ability==='strike')impulse*=2;
-     else if(shooter.ability==='giant')impulse*=Math.pow(1.1,Math.min(3,shooter.growthStacks+1));
+     if(!world.preparation&&shooter.ability==='strike')impulse*=2;
+     else if(!world.preparation&&shooter.ability==='giant')impulse*=Math.pow(1.1,Math.min(3,shooter.growthStacks+1));
     }
     a.vx-=nx*impulse/a.m;a.vy-=ny*impulse/a.m;b.vx+=nx*impulse/b.m;b.vy+=ny*impulse/b.m;
     if(!a.merged&&!b.merged&&a.word===b.word&&a.text!==b.text&& -rv>55){
@@ -419,13 +478,13 @@ function evaluateShot(world, shooter,dir,power,spin){
  }
  const enemy=1-shooter.owner;
  score+=(n0[enemy]-after[enemy])*225-(n0[shooter.owner]-after[shooter.owner])*225;
- score+=doneMerges*26;
- if(shooter.ability==='vortex')score+=bs.filter(b=>b.alive&&b.owner!==shooter.owner&&hypot(b.x-actor.x,b.y-actor.y)<235).length*18;
- if(shooter.ability==='shock')score+=bs.filter(b=>b.alive&&b.owner!==shooter.owner&&hypot(b.x-actor.x,b.y-actor.y)<175).length*16;
- if(shooter.ability==='iron')score+=bs.filter(b=>b.alive&&b.owner===shooter.owner&&hypot(b.x-actor.x,b.y-actor.y)<124).length*8;
+ score+=doneMerges*(world.preparation?110:26);
+ if(!world.preparation&&shooter.ability==='vortex')score+=bs.filter(b=>b.alive&&b.owner!==shooter.owner&&hypot(b.x-actor.x,b.y-actor.y)<117.5).length*18;
+ if(!world.preparation&&shooter.ability==='shock')score+=bs.filter(b=>b.alive&&b.owner!==shooter.owner&&hypot(b.x-actor.x,b.y-actor.y)<62).length*16;
+ if(!world.preparation&&shooter.ability==='iron')score+=bs.filter(b=>b.alive&&b.owner===shooter.owner&&hypot(b.x-actor.x,b.y-actor.y)<186).length*8;
  const movement=hypot(actor.x-shooter.x,actor.y-shooter.y);
  score+=Math.min(movement,250)*.018;
  return score;
 }
-global.KanjiPhysics={W,H,WORDS,PIECE_UNIT,body,newWorld,spawnInitial,step,fire,settle,remaining,allStopped,createMerged,triggerShock,awakenPiece,shapeFor,manifold,evaluateShot,finishTurn,defenseFactor,fieldPosition,growGiant,startVortex,clamp};
+global.KanjiPhysics={W,H,WORDS,PIECE_UNIT,body,newWorld,spawnInitial,step,fire,settle,remaining,allStopped,createMerged,triggerShock,awakenPiece,shapeFor,manifold,evaluateShot,finishTurn,openArena,expandGates,defenseFactor,fieldPosition,growGiant,startVortex,clamp};
 })(window);
