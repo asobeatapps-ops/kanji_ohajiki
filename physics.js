@@ -1,4 +1,4 @@
-/* 漢字おはじき：dependency-free 2D compound-SAT impulse solver.
+/* 漢字おはじき Ver.1.1: dependency-free 2D compound-SAT impulse solver.
    World units: board coordinates 540 x 760. Time: seconds. Clockwise rotation is positive.
    Runs physics at a fixed 1/120 second timestep in game.js, render separately.
 */
@@ -44,7 +44,7 @@ function body({x,y,text,owner,word,merged=false,angle=0,vx=0,vy=0,omega=0}){
  const s=shapeFor(text),ability=merged?(WORDS[word]?.ability||null):null;
  const mass=merged?(ability==='iron'?2.65:2.1):1;
  const inertia=mass*(s.w*s.w+s.h*s.h)/12;
- return {id:idSeq++,text,word,owner,merged,ability,x,y,vx,vy,angle,omega,mass,invM:1/mass,invI:1/inertia,w:s.w,h:s.h,parts:s.parts,radius:hypot(s.w,s.h)*.58+6,burstAge:null,burstFired:false,alive:true,merging:false,trail:[],trailTime:0,shotAt:-100,flash:0};
+ return {id:idSeq++,text,word,owner,merged,ability,x,y,vx,vy,angle,omega,mass,invM:1/mass,invI:1/inertia,w:s.w,h:s.h,parts:s.parts,radius:hypot(s.w,s.h)*.58+6,burstAge:null,burstFired:false,shockArmed:false,awakened:false,awakenAt:-1,alive:true,merging:false,trail:[],trailTime:0,shotAt:-100,flash:0};
 }
 function staticRect(x,y,w,h){return {id:'wall',owner:-1,x,y,angle:0,vx:0,vy:0,omega:0,invM:0,invI:0,mass:Infinity,parts:[{x:0,y:0,w,h}],radius:hypot(w,h)/2,alive:true,static:true};}
 function walls(){const t=22,gx=184,gy=165;return [
@@ -147,15 +147,27 @@ function step(world,dt,hooks={}){
   if(b.angle>Math.PI*2)b.angle-=Math.PI*2;if(b.angle< -Math.PI*2)b.angle+=Math.PI*2;
   b.flash=Math.max(0,b.flash-dt*3);
  }
- // Repulsive field affects enemies, not the owner; no contact required.
- for(const b of bodies){if(!b.alive||b.merging||b.ability!=='shock'||hypot(b.vx,b.vy)<45)continue;
-  for(const other of bodies){if(other===b||!other.alive||other.merging||other.owner===b.owner)continue;
-   const dx=other.x-b.x,dy=other.y-b.y,dist=hypot(dx,dy)||1,r=126;
-   if(dist<r){const s=(1-dist/r),force=s*s*2500*dt;
-    other.vx+=dx/dist*force/other.mass;other.vy+=dy/dist*force/other.mass;
-    b.vx-=dx/dist*force*.12/b.mass;b.vy-=dy/dist*force*.12/b.mass;
-    if(world.time-(b.lastFieldFX||0)>.11){b.lastFieldFX=world.time;hooks.field?.(b,other)}
+ // Shock-wave is a one-off radial blast from the FIRST physical hit, including walls.
+ // A propagating front applies one impulse per piece, precisely when it reaches the piece.
+ if(world.shocks.length){
+  for(let i=world.shocks.length-1;i>=0;i--){
+   const wave=world.shocks[i];wave.age+=dt;
+   wave.radius=Math.min(wave.maxRadius,wave.age*wave.speed);
+   for(const target of bodies){
+    if(!target.alive||target.merging||target.id===wave.sourceId||wave.hit.has(target.id))continue;
+    const dx=target.x-wave.x,dy=target.y-wave.y,dist=hypot(dx,dy);
+    if(dist > wave.radius+target.radius*.23)continue;
+    wave.hit.add(target.id);
+    // The blast can affect BOTH teams: aiming is tactical, friendly fire is possible.
+    const falloff=1-.74*clamp(dist/wave.maxRadius,0,1);
+    const impulse=850*falloff/(target.ability==='iron'?Math.sqrt(target.mass)*1.18:Math.sqrt(target.mass));
+    const nx=dist>1?dx/dist:Math.cos((target.id%12)*.53),ny=dist>1?dy/dist:Math.sin((target.id%12)*.53);
+    target.vx+=nx*impulse;target.vy+=ny*impulse;
+    target.omega+=((target.id%2)?1:-1)*(2.1*falloff);
+    target.flash=Math.max(target.flash,.5);
+    hooks.shockHit?.(wave,target,impulse);
    }
+   if(wave.age>Math.max(.48,wave.maxRadius/wave.speed+.15))world.shocks.splice(i,1);
   }
  }
  const merges=[];
@@ -187,9 +199,21 @@ function step(world,dt,hooks={}){
    const out=(b.x < -b.w*.4 || b.x>W+b.w*.4 || b.y< -b.h*.4 || b.y>H+b.h*.4);
    if(out){b.alive=false;hooks.out?.(b)}
  }
+ // The LAST unmerged character automatically awakens into its intended two-kanji word.
+ // Apply once after all KOs for this simulation step; do not create a piece for a defeated team.
+ if(remaining(world,0)>0 && remaining(world,1)>0){
+  for(let owner=0;owner<2;owner++){
+   if(world.awakenedOwners.has(owner))continue;
+   const left=bodies.filter(b=>b.alive&&b.owner===owner);
+   if(left.length!==1||left[0].merged)continue;
+   const old=left[0];
+   const upgraded=awakenPiece(world,old);
+   hooks.awaken?.(upgraded,old);
+  }
+ }
  return world;
 }
-function newWorld(){return {w:W,h:H,time:0,bodies:[],walls:walls(),shooterId:null,lastShooterOwner:0,shotTime:0};}
+function newWorld(){return {w:W,h:H,time:0,bodies:[],walls:walls(),shocks:[],awakenedOwners:new Set(),shooterId:null,lastShooterOwner:0,shotTime:0};}
 function spawnInitial(world,decks){
  // Side-by-side letters keep the board readable while giving each player achievable fusions.
  for(let owner=0;owner<2;owner++)for(let i=0;i<3;i++){
@@ -200,16 +224,20 @@ function spawnInitial(world,decks){
    world.bodies.push(body({x:xB+(i%2?-9:9),y,text:second,owner,word,angle:(owner?-.04:.04)}));
  }
 }
-function fire(world,b,dx,dy,power,spin){
+function fire(world,b,dx,dy,power,spin,spinStrength=1){
  const len=hypot(dx,dy)||1,amount=clamp(power,0,1);
  let speed=230+875*Math.pow(amount,1.12);
  if(b.ability==='iron')speed*=.8;
- b.vx=dx/len*speed;b.vy=dy/len*speed;b.omega=spin*(2.5+5.0*amount);
+ b.vx=dx/len*speed;b.vy=dy/len*speed;
+ // Spin strength is proportional to distance from piece to gesture START.
+ const spinPower=clamp(spinStrength,0,1);
+ b.omega=spin*(2.5+5.0*amount)*(.10+.90*spinPower);
  b.isLaunched=true;b.shotAt=world.time;b.burstAge=b.ability==='burst'?0:null;b.burstFired=false;
+ b.shockArmed=b.ability==='shock';
  world.shooterId=b.id;world.lastShooterOwner=b.owner;world.shotTime=world.time;
  return speed;
 }
-function settle(world){for(const b of world.bodies){b.vx=0;b.vy=0;b.omega=0;b.isLaunched=false;b.burstAge=null;b.trail=[]}}
+function settle(world){for(const b of world.bodies){b.vx=0;b.vy=0;b.omega=0;b.isLaunched=false;b.burstAge=null;b.shockArmed=false;b.trail=[]}world.shocks.length=0;}
 function allStopped(world){return world.bodies.filter(b=>b.alive&&!b.merging).every(b=>hypot(b.vx,b.vy)<10&&Math.abs(b.omega)<.17)}
 function createMerged(world,a,b){
  const mass=a.mass+b.mass;
@@ -229,6 +257,29 @@ function createMerged(world,a,b){
  world.bodies.push(newB);return newB;
 }
 function remaining(world,owner){return world.bodies.filter(b=>b.alive&&b.owner===owner).length}
+function triggerShock(world,attacker,point){
+ if(!attacker||!attacker.alive||!attacker.shockArmed||attacker.id!==world.shooterId||attacker.ability!=='shock')return null;
+ attacker.shockArmed=false;
+ const wave={x:clamp(point.x,7,W-7),y:clamp(point.y,7,H-7),owner:attacker.owner,sourceId:attacker.id,
+  age:0,radius:0,maxRadius:255,speed:650,hit:new Set()};
+ world.shocks.push(wave);return wave;
+}
+function awakenPiece(world,old){
+ const result=body({x:old.x,y:old.y,vx:old.vx,vy:old.vy,omega:old.omega,angle:old.angle,
+  text:old.word,word:old.word,owner:old.owner,merged:true});
+ result.awakened=true;result.awakenAt=world.time;result.shotAt=old.shotAt;
+ result.burstAge=null;result.burstFired=false;result.isLaunched=!!old.isLaunched;
+ old.alive=false;old.merging=false;
+ if(world.shooterId===old.id)world.shooterId=result.id;
+ world.awakenedOwners.add(old.owner);world.bodies.push(result);
+ // Soft separation to avoid spawning the larger kanji fully inside an opponent.
+ for(let k=0;k<7;k++)for(const other of world.bodies){
+  if(!other.alive||other===result)continue;const hit=manifold(result,other);if(!hit)continue;
+  result.x-=hit.n.x*hit.depth*.48;result.y-=hit.n.y*hit.depth*.48;
+  other.x+=hit.n.x*hit.depth*.52;other.y+=hit.n.y*hit.depth*.52;
+ }
+ return result;
+}
 // Simplified 2-second disk physics predictor; only CPU planning uses this, never real collisions.
 function evaluateShot(world, shooter,dir,power,spin){
  const bs=world.bodies.filter(b=>b.alive).map(b=>({x:b.x,y:b.y,vx:0,vy:0,m:b.mass,r:b.merged?42:29,owner:b.owner,text:b.text,word:b.word,merged:b.merged,alive:true,src:b.id===shooter.id,spin:0}));
@@ -275,5 +326,5 @@ function evaluateShot(world, shooter,dir,power,spin){
  score+=Math.min(movement,250)*.018;
  return score;
 }
-global.KanjiPhysics={W,H,WORDS,body,newWorld,spawnInitial,step,fire,settle,remaining,allStopped,createMerged,shapeFor,manifold,evaluateShot,clamp};
+global.KanjiPhysics={W,H,WORDS,body,newWorld,spawnInitial,step,fire,settle,remaining,allStopped,createMerged,triggerShock,awakenPiece,shapeFor,manifold,evaluateShot,clamp};
 })(window);

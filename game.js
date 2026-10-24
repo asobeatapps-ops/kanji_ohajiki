@@ -1,11 +1,11 @@
-/* 漢字おはじき Ver.1.0 | ASOBEAT — standalone offline-friendly browser game */
+/* 漢字おはじき Ver.1.1 | ASOBEAT — anywhere aim, shock blast, awakening */
 (function(){'use strict';
 const P=window.KanjiPhysics;if(!P){document.body.textContent='物理エンジンを読み込めませんでした。';return;}
-const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'1秒後に加速','衝撃':'周囲を押す','鉄壁':'吹き飛びに強い'};
+const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'1秒後に加速','衝撃':'初衝突で円形爆風','鉄壁':'吹き飛びに強い'};
 const $=id=>document.getElementById(id),ctx=$('board').getContext('2d',{alpha:false});
 const {W,H}=P,PI=Math.PI,TAU=PI*2,clamp=P.clamp;
 const scenes=['home','setup','confirm','game','result'];
-const st={scene:'home',mode:'solo',diff:'normal',decks:[['暴走','衝撃','鉄壁'],['衝撃','鉄壁','暴走']],names:['青チーム','CPU'],world:null,phase:'title',turn:0,spin:1,drag:null,selected:null,fx:[],texts:[],bannerUntil:0,shake:0,flash:0,hitstop:0,time:0,acc:0,moving:0,still:0,shotCount:0,stats:{outs:[0,0],merges:[0,0],crits:[0,0]},turnToken:0,sound:true,result:null,geom:null};
+const st={scene:'home',mode:'solo',diff:'normal',decks:[['暴走','衝撃','鉄壁'],['衝撃','鉄壁','暴走']],names:['青チーム','CPU'],world:null,phase:'title',turn:0,spin:1,drag:null,selected:null,fx:[],texts:[],bannerUntil:0,shake:0,flash:0,hitstop:0,time:0,acc:0,moving:0,still:0,shotCount:0,stats:{outs:[0,0],merges:[0,0],crits:[0,0],awakens:[0,0]},turnToken:0,sound:true,result:null,geom:null};
 let audio=null,noiseBuffer=null,animLast=0,rafId=0;let timers=[];
 function later(fn,ms){const token=st.turnToken;const id=setTimeout(()=>{timers=timers.filter(x=>x!==id);if(token===st.turnToken)fn()},ms);timers.push(id);return id}
 function cancelAsync(){st.turnToken++;for(const id of timers)clearTimeout(id);timers=[]}
@@ -55,6 +55,8 @@ function sound(type,magnitude=1){if(!st.sound)return;initAudio();
  if(type==='merge'){note(360,.13,.10,'triangle',0,530);note(520,.18,.09,'triangle',.10,790);note(770,.24,.12,'sine',.19,1200)}
  if(type==='out'){noise(.10,.09);note(310,.19,.10,'square',0,100)}
  if(type==='burst'){note(210,.31,.10,'sawtooth',0,580);noise(.12,.07,.02)}
+ if(type==='shock'){noise(.22,.16);note(210,.27,.11,'sawtooth',0,70);note(680,.16,.10,'triangle',.04,270)}
+ if(type==='awake'){note(330,.16,.12,'triangle',0,490);note(520,.21,.10,'triangle',.10,760);note(830,.35,.14,'sine',.25,1200)}
  if(type==='win'){for(let i=0;i<4;i++)note([392,523,659,784][i],.33,.095,'triangle',i*.09)}
  if(type==='tap')note(450,.06,.035,'triangle',0,580);
 }
@@ -65,7 +67,7 @@ function roulette(){cancelAsync();initAudio();const bits=new Uint32Array(1);try{
  later(()=>startMatch(first),1970);
 }
 function makeNames(){for(let i=0;i<2;i++)$('gameName'+i).textContent=st.names[i]}
-function startMatch(first=null){cancelAsync();st.world=P.newWorld();P.spawnInitial(st.world,st.decks);st.drag=null;st.selected=null;st.fx=[];st.texts=[];st.phase='playing';st.turn=first===null?st.turn:first;st.spin=1;st.hitstop=0;st.shake=0;st.flash=0;st.time=0;st.acc=0;st.moving=0;st.still=0;st.shotCount=0;st.result=null;st.stats={outs:[0,0],merges:[0,0],crits:[0,0]};st._impactTimes=new Map();
+function startMatch(first=null){cancelAsync();st.world=P.newWorld();P.spawnInitial(st.world,st.decks);st.drag=null;st.selected=null;st.fx=[];st.texts=[];st.phase='playing';st.turn=first===null?st.turn:first;st.spin=1;st.hitstop=0;st.shake=0;st.flash=0;st.time=0;st.acc=0;st.moving=0;st.still=0;st.shotCount=0;st.result=null;st.stats={outs:[0,0],merges:[0,0],crits:[0,0],awakens:[0,0]};st._impactTimes=new Map();
  $('spinRight').classList.add('active');$('spinLeft').classList.remove('active');makeNames();
  changeScene('game');resizeCanvas();updateHud();beginTurn();
 }
@@ -78,30 +80,39 @@ function beginTurn(){if(st.phase==='result'||!st.world)return;st.phase='playing'
  $('spinRight').classList.add('active');$('spinLeft').classList.remove('active');
  $('turnText').textContent=st.turn===0?'🔵 青の番':'🔴 赤の番';
  $('phaseText').textContent=st.mode==='solo'&&st.turn===1?'CPU思考中…':'漢字を弾こう';
- $('selectedLabel').textContent=st.mode==='solo'&&st.turn===1?'CPUが狙っています…':'自分の漢字をタップ';
- $('hintLabel').textContent='逆に引っ張って指を離す';
+ $('selectedLabel').textContent=st.mode==='solo'&&st.turn===1?'CPUが狙っています…':'① 漢字をタップして選択';
+ $('hintLabel').textContent='② 好きな場所から逆方向へドラッグ';
+ $('aimHint').classList.add('hidden');$('spinMeter').textContent='回転力 --';
  const cpu=st.mode==='solo'&&st.turn===1;
  for(const id of ['spinRight','spinLeft'])$(id).disabled=cpu;
  updateHud();if(cpu)later(cpuTakeTurn,550);
 }
-function fireShot(b,dirX,dirY,power,spin){if(st.phase!=='playing'||!b||!b.alive||b.owner!==st.turn)return false;
+function fireShot(b,dirX,dirY,power,spin,spinStrength=1){if(st.phase!=='playing'||!b||!b.alive||b.owner!==st.turn)return false;
  const len=Math.hypot(dirX,dirY);if(len<.01||power<.06)return false;
- P.fire(st.world,b,dirX,dirY,power,spin);st.shotCount++;st.phase='moving';st.moving=0;st.still=0;st.acc=0;st.selected=null;st.drag=null;
+ P.fire(st.world,b,dirX,dirY,power,spin,spinStrength);st.shotCount++;st.phase='moving';st.moving=0;st.still=0;st.acc=0;st.selected=null;st.drag=null;
  $('phaseText').textContent='物理演算中…';$('selectedLabel').textContent=b.text+'、発射！';$('hintLabel').textContent='全コマが止まると交代';
- addParticles(b.x,b.y,10,st.turn===0?'#70c5f7':'#f4a29c',1);st.shake=2.6;sound('shoot');
- if(b.ability==='shock'){showEffect('衝撃領域 展開！',900);sound('burst')}
+ addParticles(b.x,b.y,10,st.turn===0?'#70c5f7':'#f4a29c',1);st.shake=2.6;sound('shoot');$('aimHint').classList.add('hidden');$('spinMeter').textContent='回転力 --';
+ if(b.ability==='shock'){showEffect('初衝突で衝撃波！',800)}
  if(b.ability==='iron')showEffect('鉄壁、発進！',650);
  return true;
 }
 function collisionHooks(){return {
  impact:({a,b,p,speed,corner,impulse})=>{
+  // One-off radial shockwave from first collision, with another piece OR a wall.
+  const shooter=(a.id===st.world.shooterId?a:b.id===st.world.shooterId?b:null);
+  if(shooter?.shockArmed && shooter.ability==='shock'){
+    const wave=P.triggerShock(st.world,shooter,p);
+    if(wave){st.shake=8;st.hitstop=Math.max(st.hitstop,.065);st.flash=.55;
+      addParticles(wave.x,wave.y,32,'#82f4ff',1.65);
+      showText('衝撃炸裂!!',wave.x,wave.y,'#d1fbff');showEffect('衝撃・全方位爆発！',1100);sound('shock');}
+  }
   // Collisions may generate adjacent contact manifolds: one SFX per pair / 120 ms.
   const key=a.static?'w'+b.id:b.static?'w'+a.id:[a.id,b.id].sort((x,y)=>x-y).join('_');
   st._impactTimes||=new Map();if((st.world.time-(st._impactTimes.get(key)||-99))<.11)return;
   st._impactTimes.set(key,st.world.time);
   const big=speed>165;
   if(big){addParticles(p.x,p.y,Math.min(18,Math.round(speed/45)),'#fbda92',speed/330);st.shake=Math.max(st.shake,clamp(speed/100,1.5,7.5));}
-  if(corner){const shooter=(a.id===st.world.shooterId?a:b.id===st.world.shooterId?b:null);
+  if(corner){
    if(shooter&&a.owner!==b.owner&&!a.static&&!b.static){st.stats.crits[shooter.owner]++;st.hitstop=Math.max(st.hitstop,.05);st.flash=.26;showText('CRITICAL ×1.2!',p.x,p.y,'#fff1a2');sound('crit');}
   }else if(big){sound('impact',speed/300);if(speed>420)st.hitstop=Math.max(st.hitstop,.022)}
  },
@@ -116,7 +127,18 @@ function collisionHooks(){return {
   addParticles(pos.x,pos.y,20,b.owner===0?'#3989c5':'#d35b58',1.3);st.shake=4.8;showText('場外!!',pos.x,pos.y,'#ffe9bb');sound('out');updateHud();
  },
  ability:(b,name)=>{if(name==='burst'){addRing(b.x,b.y,'#e75552',115);addParticles(b.x,b.y,23,'#f67252',1.4);showText('暴走開始!!',b.x,b.y,'#f9a36d');showEffect('暴走加速!!',900);sound('burst')}},
- field:(b,other)=>{if(Math.random()<.12)addParticles(other.x,other.y,2,'#8ddbf3',.5)}
+ shockHit:(wave,target,impulse)=>{
+  addParticles(target.x,target.y,Math.max(5,Math.round(impulse/100)),'#8ddbf3',.65);
+  st.shake=Math.max(st.shake,Math.min(5,impulse/200));
+ },
+ awaken:(upgraded,original)=>{
+  st.stats.awakens[upgraded.owner]++;
+  addRing(upgraded.x,upgraded.y,'#f7c551',135);
+  addParticles(upgraded.x,upgraded.y,33,'#f4c960',1.45);
+  st.flash=.45;st.hitstop=Math.max(st.hitstop,.09);st.shake=6.5;
+  showText('覚醒！『'+upgraded.text+'』',upgraded.x,upgraded.y,'#fff2b4');
+  showEffect((upgraded.owner===0?'青':'赤')+'のラスト1文字、覚醒!!',1300);sound('awake');updateHud();
+ }
 }}
 function tickPhysics(dt){if(st.hitstop>0){st.hitstop=Math.max(0,st.hitstop-dt);return;}
  st.moving+=dt;st.acc+=Math.min(dt,.05);let steps=0;
@@ -140,8 +162,9 @@ function finishGame(winner){cancelAsync();st.phase='result';st.result={winner,tu
  $('statOuts').textContent=st.stats.outs.reduce((a,b)=>a+b,0);
  $('statMerges').textContent=st.stats.merges.reduce((a,b)=>a+b,0);
  $('statCrits').textContent=st.stats.crits.reduce((a,b)=>a+b,0);
+ $('statAwakens').textContent=st.stats.awakens.reduce((a,b)=>a+b,0);
  $('resultDecks').textContent='';for(let i=0;i<2;i++){
-  const item=document.createElement('p');item.textContent=`${i===0?'🔵':'🔴'} ${st.names[i]}　${st.decks[i].join(' / ')}　｜ KO ${st.stats.outs[i]} / 合体 ${st.stats.merges[i]} / CRITICAL ${st.stats.crits[i]}`;$('resultDecks').appendChild(item)
+  const item=document.createElement('p');item.textContent=`${i===0?'🔵':'🔴'} ${st.names[i]}　${st.decks[i].join(' / ')}　｜ KO ${st.stats.outs[i]} / 合体 ${st.stats.merges[i]} / CRITICAL ${st.stats.crits[i]} / 覚醒 ${st.stats.awakens[i]}`;$('resultDecks').appendChild(item)
  }
  changeScene('result');sound('win');
 }
@@ -177,30 +200,57 @@ function cpuTakeTurn(){if(!st.world||st.phase!=='playing'||st.turn!==1||st.mode!
 }
 function boardPoint(evt){const r=$('board').getBoundingClientRect();return{x:(evt.clientX-r.left)*W/r.width,y:(evt.clientY-r.top)*H/r.height}}
 function selectable(){return st.scene==='game'&&st.phase==='playing'&&!(st.mode==='solo'&&st.turn===1)}
-function findSelected(p){if(!st.world)return null;let best=null,dist=Infinity;
+function findSelected(pos){if(!st.world)return null;let best=null,dist=Infinity;
  for(const b of st.world.bodies){if(!b.alive||b.owner!==st.turn)continue;
-  const d=Math.hypot(b.x-p.x,b.y-p.y),allowed=Math.max(b.w,b.h)*.68+15;
+  const d=Math.hypot(b.x-pos.x,b.y-pos.y),allowed=Math.max(b.w,b.h)*.68+15;
   if(d<allowed&&d<dist){best=b;dist=d}
  }return best;
 }
-function pointerDown(e){if(!selectable())return;const p=boardPoint(e),b=findSelected(p);
- if(!b)return;initAudio();e.preventDefault();try{$('board').setPointerCapture(e.pointerId)}catch(err){}
- st.selected=b;st.drag={pointer:e.pointerId,body:b,start:p,current:p,dx:0,dy:0,power:0};
- $('selectedLabel').textContent=b.merged?b.text+'：'+DESCRIPTIONS[b.text]:b.text+'を選択中';
- $('hintLabel').textContent='矢印の向きへ発射！';sound('tap')
+function selectPiece(b){st.selected=b;st.drag=null;
+ $('selectedLabel').textContent=b.merged?`『${b.text}』を選択`:`「${b.text}」を選択`;
+ $('hintLabel').textContent='盤面の外からでもドラッグして発射！';
+ $('aimHint').textContent=`${b.text} を選択中 · 好きな位置で逆方向に引っ張ろう`;
+ $('aimHint').classList.remove('hidden');
+ $('spinMeter').textContent='回転力：開始位置で変化';sound('tap');
 }
-function pointerMove(e){if(!st.drag||st.drag.cpu||e.pointerId!==st.drag.pointer)return;const p=boardPoint(e);e.preventDefault();
- st.drag.current=p;st.drag.dx=st.drag.start.x-p.x;st.drag.dy=st.drag.start.y-p.y;
- st.drag.power=clamp(Math.hypot(st.drag.dx,st.drag.dy)/142,0,1);
- $('hintLabel').textContent='発射パワー '+Math.round(st.drag.power*100)+'%　・　指を離して発射';
+// Spin is determined by the gap between the SELECTED piece and where the
+// NEXT drag gesture BEGINS, NOT by the distance to an inaccessible board edge.
+function aimSpinAt(body,start){return clamp(Math.hypot(start.x-body.x,start.y-body.y)/420,0,1)}
+function startAim(e,b){initAudio();const pos=boardPoint(e);
+ const strength=aimSpinAt(b,pos);
+ st.drag={pointer:e.pointerId,body:b,start:pos,current:pos,dx:0,dy:0,power:0,spinStrength:strength};
+ try{$('gameScene').setPointerCapture(e.pointerId)}catch(err){}
+ $('hintLabel').textContent=`回転力 ${Math.round(strength*100)}% ・逆へ引っ張ろう`;
+ $('spinMeter').textContent=`↻↺ 回転力 ${Math.round(strength*100)}%`;
 }
-function pointerUp(e){if(!st.drag||st.drag.cpu||e.pointerId!==st.drag.pointer)return;e.preventDefault();
- const drag=st.drag;st.drag=null;const d=Math.hypot(drag.dx,drag.dy);
- if(d>13){const success=fireShot(drag.body,drag.dx,drag.dy,drag.power,st.spin);
-  if(!success){$('hintLabel').textContent='もっと大きく引っ張ってください'}
- }else{$('hintLabel').textContent='逆方向へドラッグしてください'}
+function pointerDown(e){if(!selectable()||st.drag)return;
+ if(e.isPrimary===false||e.button!==undefined&&e.button!==0)return;
+ if(e.target.closest('button,input,select,a'))return;
+ const pos=boardPoint(e),onCanvas=e.target.id==='board';
+ const candidate=onCanvas?findSelected(pos):null;
+ // First tap a kanji to select. Tapping a different kanji switches selection.
+ if(candidate&&candidate!==st.selected){e.preventDefault();initAudio();selectPiece(candidate);return;}
+ if(!st.selected)return;
+ // Next gesture can begin ANYWHERE in the game screen (even beyond the board).
+ e.preventDefault();startAim(e,st.selected);
 }
-function pointerCancel(){if(st.drag&&!st.drag.cpu)st.drag=null}
+function pointerMove(e){if(!st.drag||st.drag.cpu||e.pointerId!==st.drag.pointer)return;
+ e.preventDefault();const pos=boardPoint(e),d=st.drag;
+ d.current=pos;d.dx=d.start.x-pos.x;d.dy=d.start.y-pos.y;
+ d.power=clamp(Math.hypot(d.dx,d.dy)/142,0,1);
+ $('hintLabel').textContent=`発射 ${Math.round(d.power*100)}% ・回転 ${Math.round(d.spinStrength*100)}%`;
+}
+function pointerUp(e){if(!st.drag||st.drag.cpu||e.pointerId!==st.drag.pointer)return;
+ e.preventDefault();pointerMove(e);const d=st.drag;st.drag=null;
+ if(Math.hypot(d.dx,d.dy)>13){
+  if(!fireShot(d.body,d.dx,d.dy,d.power,st.spin,d.spinStrength)){
+   $('hintLabel').textContent='もう少し長く引っ張ってください';
+  }
+ }else{$('hintLabel').textContent='選択OK！ 好きな場所から大きくドラッグ';}
+}
+function pointerCancel(e){if(st.drag&&!st.drag.cpu&&(!e||e.pointerId===st.drag.pointer)){
+ st.drag=null;$('hintLabel').textContent='操作を中断しました。好きな場所から再入力';
+}}
 function addRing(x,y,color='#e7c384',size=80){st.fx.push({type:'ring',x,y,color,r:5,max:size,t:0,life:.44})}
 function addParticles(x,y,count,color,energy=1){for(let i=0;i<count&&st.fx.length<260;i++){
  const theta=Math.random()*TAU,speed=(70+Math.random()*245)*energy;
@@ -248,7 +298,8 @@ function drawPiece(b){const color=b.owner===0?'#2473ab':'#c7504f',dark=b.owner==
  ctx.save();ctx.strokeStyle=b.owner===0?'#2ba5e3':'#d96255';ctx.lineWidth=2;ctx.setLineDash([5,5]);ctx.globalAlpha=.85;
  ctx.beginPath();ctx.ellipse(0,0,b.w*.70+11,b.h*.70+11,0,0,TAU);ctx.stroke();ctx.restore();
  }
- if(b.ability==='shock'&&Math.hypot(b.vx,b.vy)>55){const r=75+Math.sin(st.time*18)*8;ctx.strokeStyle='#45d6ed99';ctx.lineWidth=5;ctx.beginPath();ctx.arc(0,0,r,0,TAU);ctx.stroke();ctx.strokeStyle='#c5f4fa66';ctx.lineWidth=2;ctx.beginPath();ctx.arc(0,0,r-15,0,TAU);ctx.stroke()}
+ if(b.ability==='shock'){ctx.strokeStyle=b.shockArmed?'#4bd8eabb':'#57c8d34f';ctx.lineWidth=2.8;ctx.beginPath();ctx.ellipse(0,0,b.w*.64+9,b.h*.7+9,0,0,TAU);ctx.stroke()}
+ if(b.awakened){ctx.strokeStyle='#f3c05cb8';ctx.shadowColor='#edc361';ctx.shadowBlur=10;ctx.lineWidth=4;ctx.beginPath();ctx.ellipse(0,0,b.w*.64+9,b.h*.70+9,0,0,TAU);ctx.stroke();ctx.shadowBlur=0;}
  if(b.ability==='burst'&&b.burstAge>=1&&b.burstAge<3){ctx.fillStyle='#ff613e33';ctx.beginPath();ctx.ellipse(0,0,b.w*.80,b.h*.75,0,0,TAU);ctx.fill()}
  if(b.ability==='iron'){ctx.lineWidth=2;ctx.strokeStyle='#c3ac76aa';ctx.strokeRect(-b.w*.53,-b.h*.57,b.w*1.06,b.h*1.14)}
  const shape=P.shapeFor(b.text),font=`1000 ${shape.fontSize}px "Noto Sans CJK JP","Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif`;
@@ -273,10 +324,30 @@ function drawDrag(){const d=st.drag;if(!d||!d.body||!d.body.alive)return;const l
  ctx.save();ctx.shadowColor='#ffffffb0';ctx.shadowBlur=9;ctx.lineCap='round';ctx.strokeStyle=st.turn===0?'#2887c6':'#d14e4c';ctx.lineWidth=5+4*d.power;
  ctx.beginPath();ctx.moveTo(x+dx*37,y+dy*37);ctx.lineTo(endx,endy);ctx.stroke();
  ctx.fillStyle=st.turn===0?'#2580bd':'#cb4e4b';ctx.beginPath();ctx.moveTo(endx+dx*19,endy+dy*19);ctx.lineTo(endx-dy*13-dx*6,endy+dx*13-dy*6);ctx.lineTo(endx+dy*13-dx*6,endy-dx*13-dy*6);ctx.closePath();ctx.fill();
- ctx.setLineDash([8,9]);ctx.lineWidth=2;ctx.globalAlpha=.6;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x-dx*Math.min(142,length),y-dy*Math.min(142,length));ctx.stroke();ctx.restore();
- ctx.fillStyle='#293747d9';ctx.font='950 16px system-ui';ctx.textAlign='center';ctx.fillText(Math.round(d.power*100)+'%',clamp(x,38,W-38),clamp(y-60,34,H-30));
+ ctx.setLineDash([8,9]);ctx.lineWidth=2;ctx.globalAlpha=.7;ctx.beginPath();
+ if(d.cpu){ctx.moveTo(x,y);ctx.lineTo(x-dx*Math.min(142,length),y-dy*Math.min(142,length))}
+ else{ctx.moveTo(d.start.x,d.start.y);ctx.lineTo(d.current.x,d.current.y)}
+ ctx.stroke();
+ if(!d.cpu){ctx.setLineDash([]);ctx.beginPath();ctx.arc(d.start.x,d.start.y,7,0,TAU);ctx.fillStyle='#fff';ctx.fill()}
+ ctx.restore();
+ ctx.textAlign='center';ctx.fillStyle='#293747ed';ctx.font='950 16px system-ui';
+ ctx.fillText(Math.round(d.power*100)+'% · 回転 '+Math.round((d.spinStrength||0)*100)+'%',clamp(x,100,W-100),clamp(y-62,34,H-30));
 }
-function drawOverlays(){for(const e of st.fx){const alpha=Math.max(0,1-e.t/e.life);ctx.save();ctx.globalAlpha=alpha;
+function drawOverlays(){
+ // A single expanding cyan pressure front, tied exactly to the physics wave.
+ for(const wave of st.world.shocks){
+  const fade=Math.max(0,1-wave.age/.59),r=wave.radius;
+  ctx.save();ctx.globalAlpha=fade;
+  const glow=ctx.createRadialGradient(wave.x,wave.y,Math.max(0,r-34),wave.x,wave.y,Math.max(r,1));
+  glow.addColorStop(0,'#7cecff00');glow.addColorStop(.6,'#55dbf24b');glow.addColorStop(1,'#f3ffff99');
+  ctx.fillStyle=glow;ctx.beginPath();ctx.arc(wave.x,wave.y,r,0,TAU);ctx.fill();
+  for(const [offset,lineW,alpha] of [[0,8,.96],[-14,3,.53],[-29,2,.23]]){
+   ctx.globalAlpha=fade*alpha;ctx.strokeStyle='#b7fbff';ctx.lineWidth=lineW;
+   ctx.beginPath();ctx.arc(wave.x,wave.y,Math.max(0,r+offset),0,TAU);ctx.stroke();
+  }
+  ctx.restore();
+ }
+ for(const e of st.fx){const alpha=Math.max(0,1-e.t/e.life);ctx.save();ctx.globalAlpha=alpha;
   if(e.type==='spark'){ctx.fillStyle=e.color;ctx.translate(e.x,e.y);ctx.rotate(e.t*8);ctx.fillRect(-e.r/2,-e.r/2,e.r*2.5,e.r*.9)}
   if(e.type==='ring'){ctx.lineWidth=6*(1-alpha)+1;ctx.strokeStyle=e.color;ctx.beginPath();ctx.arc(e.x,e.y,e.max*(e.t/e.life),0,TAU);ctx.stroke()}
   ctx.restore();
@@ -308,17 +379,23 @@ for(const b of $('difficultyOptions').querySelectorAll('button'))b.addEventListe
 $('name0').addEventListener('change',readSetup);$('name1').addEventListener('change',readSetup);
 $('spinRight').addEventListener('click',()=>{st.spin=1;$('spinRight').classList.add('active');$('spinLeft').classList.remove('active');sound('tap')});
 $('spinLeft').addEventListener('click',()=>{st.spin=-1;$('spinLeft').classList.add('active');$('spinRight').classList.remove('active');sound('tap')});
-$('board').addEventListener('pointerdown',pointerDown);$('board').addEventListener('pointermove',pointerMove);$('board').addEventListener('pointerup',pointerUp);$('board').addEventListener('pointercancel',pointerCancel);$('board').addEventListener('lostpointercapture',()=>{});
+// Use the entire game scene as an aim surface, not only the canvas.
+// Capturing at scene level preserves the drag if a finger crosses its edge.
+$('gameScene').addEventListener('pointerdown',pointerDown);
+$('gameScene').addEventListener('pointermove',pointerMove);
+$('gameScene').addEventListener('pointerup',pointerUp);
+$('gameScene').addEventListener('pointercancel',pointerCancel);
+$('gameScene').addEventListener('lostpointercapture',e=>{if(st.drag&&e.pointerId===st.drag.pointer)pointerCancel(e)});
 $('quitBtn').addEventListener('click',()=>{onModal(`<p><b>対戦を終了しますか？</b></p><p>この対戦の進行状況は保存されません。</p><button type="button" class="ghost-btn" id="endMatch">対戦を終了してタイトルへ戻る</button>`,'対戦を終了');$('endMatch').addEventListener('click',()=>{cancelAsync();st.phase='title';changeScene('home')})});
 $('rematchBtn').addEventListener('click',()=>{const bits=new Uint32Array(1);try{crypto.getRandomValues(bits)}catch(e){bits[0]=Math.floor(Math.random()*2)};startMatch(bits[0]%2)});
 $('resultHomeBtn').addEventListener('click',()=>{cancelAsync();st.phase='title';changeScene('home')});
-$('helpBtn').addEventListener('click',()=>onModal(`<p><b>① 漢字を弾こう</b><br>自分の漢字をタップ → 飛ばしたい方向と逆に引っ張る → 指を離すと発射。</p><p><b>② 漢字を合体</b><br>「暴」＋「走」＝「暴走」、「衝」＋「撃」＝「衝撃」、「鉄」＋「壁」＝「鉄壁」。2文字が勢いよく接触すると合体して強化！</p><p><b>③ 能力</b><br>暴走：1秒後から2秒間加速。<br>衝撃：動いている間、敵を近づけない。<br>鉄壁：発射速度0.8倍、弾かれにくい。</p><p><b>④ 勝利</b><br>四辺の真ん中にある赤い場外口から相手をすべて落とす。↻と↺で回転切替、角当てでクリティカル！</p>`, '遊びかた'));
+$('helpBtn').addEventListener('click',()=>onModal(`<p><b>① 好きな場所から発射</b><br>自分の漢字を1回タップして選択 → 次は盤面の好きな場所（盤面の外側でもOK）から指をドラッグ → 飛ばしたい方向の逆に引っ張って指を離す。右・左回転はボタンで変更できます。</p><p><b>② 回転力</b><br>選んだ漢字から、ドラッグを始めた位置が遠いほど回転が強くなります。方向はドラッグの向き、パワーはドラッグ距離で決まります。</p><p><b>③ 漢字を合体</b><br>暴＋走＝暴走、衝＋撃＝衝撃、鉄＋壁＝鉄壁。味方同士も敵味方でも合体できます。</p><p><b>④ 能力</b><br>暴走：1秒後から2秒間加速。<br>衝撃：発射後、最初の衝突地点（壁もOK）を中心に円形の大衝撃波。味方も飛びます。<br>鉄壁：発射速度0.8倍、弾かれにくい。</p><p><b>⑤ 覚醒</b><br>自分の残りが1コマで未合体なら、元の熟語へ自動覚醒！固有能力も使えます。</p><p><b>⑥ 勝利</b><br>四辺中央の場外口から相手を全部落とす。角当てでCRITICAL ×1.2！</p>`, '遊びかた'));
 $('modalClose').addEventListener('click',closeModal);$('modalOK').addEventListener('click',closeModal);$('modal').addEventListener('click',e=>{if(e.target===$('modal'))closeModal()});
 $('soundBtn').addEventListener('click',()=>{st.sound=!st.sound;$('soundBtn').classList.toggle('muted',!st.sound);$('soundBtn').textContent=st.sound?'♪':'×';if(st.sound){initAudio();sound('tap')}save()});
 $('soundBtn').classList.toggle('muted',!st.sound);$('soundBtn').textContent=st.sound?'♪':'×';
 window.addEventListener('resize',()=>{if(st.scene==='game')resizeCanvas()});
-window.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();return}if(e.code==='Space'&&st.scene==='game'&&st.drag&&st.drag.body&&st.drag.power>.06){e.preventDefault();const d=st.drag;fireShot(d.body,d.dx,d.dy,d.power,st.spin)}});
+window.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();return}if(e.code==='Space'&&st.scene==='game'&&st.drag&&st.drag.body&&st.drag.power>.06){e.preventDefault();const d=st.drag;fireShot(d.body,d.dx,d.dy,d.power,st.spin,d.spinStrength??1)}});
 // Extra hook for deterministic and automated smoke tests; only exposed when ?test=1.
-if(new URLSearchParams(location.search).has('test'))window.__KANJI_TEST__={st,P,setup,confirm,startMatch,fireShot,finishGame,finishShot,beginTurn,draw:()=>paint(.016),cpuTakeTurn,resizeCanvas};
+if(new URLSearchParams(location.search).has('test'))window.__KANJI_TEST__={st,P,setup,confirm,startMatch,fireShot,finishGame,finishShot,beginTurn,selectPiece,aimSpinAt,draw:()=>paint(.016),cpuTakeTurn,resizeCanvas};
 makeBoardArt();requestAnimationFrame(mainLoop);
 })();

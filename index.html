@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
   <meta name="theme-color" content="#151f30">
   <meta name="description" content="漢字を弾いて、熟語に合体！角当てクリティカルで相手を場外へ。ASOBEATの無料対戦おはじきゲーム。">
-  <title>漢字おはじき | ASOBEAT</title>
+  <title>漢字おはじき Ver.1.1 | ASOBEAT</title>
   <link rel="stylesheet" href="style.css">
   <script defer src="physics.js"></script>
   <script defer src="game.js"></script>
@@ -78,11 +78,12 @@
     <div id="boardWrap" class="board-wrap">
       <canvas id="board" width="540" height="760" aria-label="漢字おはじきの対戦盤面"></canvas>
       <div id="effectBanner" class="effect-banner hidden" aria-live="polite"></div>
+      <div id="aimHint" class="aim-hint hidden" role="status">漢字を選択しました · 好きな位置からドラッグ！</div>
       <div class="board-corner top-left">KANJI</div><div class="board-corner bottom-right">ARENA</div>
     </div>
     <div class="game-bottom">
-      <div class="rotate-container"><span class="control-heading">回転方向</span><div class="segmented rotate-switch" role="group" aria-label="回転方向"><button id="spinRight" class="active" type="button">↻ 右回転</button><button id="spinLeft" type="button">↺ 左回転</button></div></div>
-      <div class="current-status"><b id="selectedLabel">自分の漢字をタップ</b><small id="hintLabel">逆方向に引っ張って指を離す</small></div>
+      <div class="rotate-container"><span class="control-heading">回転方向 <span id="spinMeter" class="spin-meter">回転力 --</span></span><div class="segmented rotate-switch" role="group" aria-label="回転方向"><button id="spinRight" class="active" type="button">↻ 右回転</button><button id="spinLeft" type="button">↺ 左回転</button></div></div>
+      <div class="current-status"><b id="selectedLabel">自分の漢字をタップ</b><small id="hintLabel">漢字をタップ → 好きな場所からドラッグ</small></div>
       <button class="quit-btn" id="quitBtn" type="button" aria-label="対戦を終了">×</button>
     </div>
   </main>
@@ -97,6 +98,7 @@
       <div class="result-metric"><b id="statOuts">0</b><small>場外KO</small></div>
       <div class="result-metric"><b id="statMerges">0</b><small>熟語合体</small></div>
       <div class="result-metric"><b id="statCrits">0</b><small>クリティカル</small></div>
+      <div class="result-metric awakening-metric"><b id="statAwakens">0</b><small>覚醒</small></div>
     </div>
     <div class="result-decks" id="resultDecks"></div>
     <button class="solid-btn" id="rematchBtn" type="button">もう一度対戦 <span>↻</span></button>
@@ -106,9 +108,10 @@
   <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
     <div class="modal-panel"><button id="modalClose" class="modal-close" aria-label="閉じる" type="button">×</button><span class="eyebrow">HOW TO PLAY</span><h2 id="modalTitle">遊びかた</h2>
       <div id="modalContent" class="modal-content">
-        <p>① 自分の漢字をタップして選択。<br>② 飛ばしたい方向と逆へ引っ張る。<br>③ 指を離すと発射！</p>
+        <p>① 自分の漢字をタップして選択。<br>② 盤面内外の好きな位置から指を置き、逆方向へドラッグ。<br>③ 指を離すと発射！離れた位置からドラッグすると回転力UP。</p>
         <p><b>熟語合体</b>：暴＋走＝暴走 / 衝＋撃＝衝撃 / 鉄＋壁＝鉄壁。対応する文字を衝突させると1つに合体して能力が発動します。</p>
-        <p><b>必殺能力</b>：暴走＝1秒後から2秒加速、衝撃＝移動中に周りの敵を弾く、鉄壁＝飛ばされにくい。</p>
+        <p><b>必殺能力</b>：暴走＝1秒後から2秒加速、衝撃＝最初の衝突地点から円形衝撃波、鉄壁＝飛ばされにくい。</p>
+        <p><b>覚醒</b>：残り1コマが未合体なら、自動でその熟語に覚醒！</p>
         <p><b>コツ</b>：↻↺で回転を選択。漢字の角を相手に当てると1.2倍のクリティカル！四辺中央の赤い開口部から相手を落とせば勝利。</p>
       </div>
       <button id="modalOK" class="solid-btn" type="button">わかった！</button>
