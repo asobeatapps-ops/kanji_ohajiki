@@ -5,10 +5,12 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
   <meta name="theme-color" content="#151f30">
   <meta name="description" content="漢字を弾いて、熟語に合体！角当てクリティカルで相手を場外へ。ASOBEATの無料対戦おはじきゲーム。">
-  <title>漢字おはじき Ver.1.5 | ASOBEAT</title>
+  <title>漢字おはじき Ver.1.7 | ASOBEAT</title>
   <link rel="stylesheet" href="style.css">
   <script defer src="physics.js"></script>
   <script defer src="game.js"></script>
+  <script defer src="practice.js"></script>
+  <script type="module" src="online.js"></script>
 </head>
 <body>
 <div id="app">
@@ -31,16 +33,54 @@
     </div>
     <div class="home-actions">
       <button class="action action-main" id="soloBtn" type="button"><span class="btn-symbol">⚔</span><span><strong>ひとりで遊ぶ</strong><small>CPUと対戦 / 3段階の難易度</small></span><span class="btn-chevron">›</span></button>
-      <button class="action action-alt" id="localBtn" type="button"><span class="btn-symbol">◈</span><span><strong>みんなで遊ぶ</strong><small>1台で交代しながら2人対戦</small></span><span class="btn-chevron">›</span></button>
+      <button class="action action-online" id="onlineBtn" type="button"><span class="btn-symbol">🌐</span><span><strong>友達とオンライン対戦</strong><small>合言葉でマッチング / 離れたスマホでもOK</small></span><span class="btn-chevron">›</span></button>
+      <button class="action action-alt" id="localBtn" type="button"><span class="btn-symbol">◈</span><span><strong>同じ端末で2人対戦</strong><small>1台で交代しながら遊ぶ</small></span><span class="btn-chevron">›</span></button>
       <button class="ability-home-btn" id="abilityHomeBtn" type="button">✦ 熟語の能力と強さを見る <span>›</span></button>
-      <div class="home-foot"><span>◆ 1試合 3〜5分が目安</span><span>◆ 無料・登録不要</span></div>
+      <div class="home-foot"><span>◆ 1試合 3〜5分が目安</span><span>◆ 無料・アカウント登録不要</span></div>
     </div>
+  </main>
+
+  <main id="matchScene" class="scene match-scene hidden">
+    <div class="scene-head"><button class="back-link" id="matchBack" type="button">‹ タイトルへ</button><span class="step-mark">ONLINE / 合言葉</span></div>
+    <h1 class="scene-title">友達と<span>対戦しよう。</span></h1>
+    <p class="section-note">2人とも同じ合言葉を入力して「マッチング開始」！<br>ひらがなとカタカナは別の文字として扱います。</p>
+    <div class="form-card"><label class="small-label" for="onlineName">プレイヤー名（10文字まで）</label>
+      <input id="onlineName" class="name-input" maxlength="10" autocomplete="nickname" placeholder="匿名" value="青チーム"/>
+      <label class="small-label" for="roomCode">合言葉（ひらがな・カタカナのみ 3〜10文字）</label>
+      <input id="roomCode" class="name-input code-input" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="10" placeholder="例：あそびーと"/>
+      <p class="code-note">「あそび」と「アソビ」は別の部屋です。空白・英数字・記号は使用できません。</p>
+      <button class="solid-btn" id="roomJoinBtn" type="button">合言葉でマッチング <span>→</span></button>
+      <div id="matchError" class="online-error hidden" role="alert"></div>
+    </div>
+    <div id="waitingPanel" class="waiting-card hidden">
+      <div class="waiting-status"><span class="online-pulse"></span><div><b id="waitingHeadline">相手を待っています…</b><small id="waitingSub">友達に合言葉を伝えてください</small></div></div>
+      <div class="practice-head"><b>待っている間に試し打ち！</b><small>練習は本番の対戦に影響しません</small></div>
+      <div class="practice-options"><select id="practiceWord" aria-label="試し打ちする熟語"><option>暴走</option><option>衝撃</option><option>鉄壁</option><option>渦巻</option><option>巨大</option><option>一撃</option><option>分裂</option></select><button id="practiceReset" type="button">↻ やり直す</button></div>
+      <canvas id="practiceBoard" width="540" height="470" aria-label="漢字コマを試し打ちできる練習盤面"></canvas>
+      <p id="practiceTip" class="practice-tip">青い熟語をタップ → 好きな位置から引っ張る → 離して発射</p>
+      <button id="roomCancelBtn" class="ghost-btn" type="button">マッチングをやめる</button>
+    </div>
+  </main>
+
+  <main id="onlineDeckScene" class="scene online-deck-scene hidden">
+    <div class="scene-head"><button class="back-link" id="onlineDeckLeave" type="button">‹ 対戦をやめる</button><span class="step-mark">ONLINE / デッキ編成</span></div>
+    <div id="onlineMatchSuccess" class="online-matched">✓ マッチ成立！</div>
+    <h1 class="scene-title">熟語を<span>3つ選ぼう。</span></h1>
+    <p class="section-note">自分だけのデッキを決めましょう。<br><b>相手には編成中のデッキは表示されません。</b></p>
+    <div id="onlineOpponent" class="online-versus-line">対戦相手と接続中…</div>
+    <div class="form-card team-form team-blue">
+      <div class="card-top"><b>あなたのデッキ</b><small>前回の選択を引き継ぎます</small></div>
+      <div id="onlineDeckOptions" class="deck-options"></div>
+    </div>
+    <p id="onlineReadyStatus" class="online-status">双方のデッキ決定を待っています</p>
+    <button id="onlineReadyBtn" class="solid-btn" type="button">このデッキで決定 <span>✓</span></button>
+    <details class="ability-guide-card"><summary>熟語の能力を確認する <span>タップで開く</span></summary><div id="onlineAbilityGuide"></div></details>
   </main>
 
   <main id="setupScene" class="scene setup-scene hidden">
     <div class="scene-head"><button class="back-link" type="button" id="setupBack">‹ 戻る</button><span class="step-mark">01 / 対戦準備</span></div>
     <h1 class="scene-title">出陣する<span>熟語</span>を選べ。</h1>
-    <p class="section-note">6つの能力から3つを選択。それぞれ2文字に分かれて出陣。<br>同じ熟語を重複して選ぶこともできます。</p>
+    <p class="section-note">7つの能力から3つを選択。それぞれ2文字に分かれて出陣。<br>同じ熟語を重複して選ぶこともできます。</p>
     <div id="cpuSettings" class="form-card"><div class="card-top"><b>CPUの強さ</b><small>ひとりで遊ぶ</small></div>
       <div class="segmented" id="difficultyOptions" role="group" aria-label="CPU難易度">
         <button data-diff="easy" type="button">かんたん</button><button data-diff="normal" class="active" type="button">ふつう</button><button data-diff="hard" type="button">むずかしい</button>
@@ -87,6 +127,7 @@
       <div id="aimHint" class="aim-hint hidden" role="status">漢字を選択しました · 好きな位置からドラッグ！</div>
       <div class="board-corner top-left">KANJI</div><div class="board-corner bottom-right">ARENA</div>
     </div>
+    <div id="onlineGameStatus" class="online-game-status hidden" role="status"></div>
     <div class="game-bottom">
       <div class="rotate-container"><span class="control-heading">回転方向 <span id="spinMeter" class="spin-meter">回転力 --</span></span><div class="segmented rotate-switch" role="group" aria-label="回転方向"><button id="spinRight" class="active" type="button">↻ 右回転</button><button id="spinLeft" type="button">↺ 左回転</button></div></div>
       <div class="current-status"><b id="selectedLabel">自分の漢字をタップ</b><small id="hintLabel">漢字をタップ → 好きな位置からドラッグ／2本指で中止</small></div>
@@ -107,7 +148,7 @@
       <div class="result-metric awakening-metric"><b id="statAwakens">0</b><small>覚醒</small></div>
     </div>
     <div class="result-decks" id="resultDecks"></div>
-    <button class="solid-btn" id="rematchBtn" type="button">もう一度対戦 <span>↻</span></button>
+    <button class="solid-btn" id="rematchBtn" type="button">もう一度戦う <span>↻</span></button>
     <button class="ghost-btn" id="resultHomeBtn" type="button">タイトルへ戻る</button>
   </main>
 
@@ -115,9 +156,9 @@
     <div class="modal-panel"><button id="modalClose" class="modal-close" aria-label="閉じる" type="button">×</button><span id="modalEyebrow" class="eyebrow">HOW TO PLAY</span><h2 id="modalTitle">遊びかた</h2>
       <div id="modalContent" class="modal-content">
         <p>① 自分の漢字をタップして選択。<br>② 盤面内外の好きな位置から逆方向へドラッグ。<br>③ 指を離すと発射！選択した漢字から遠い位置でドラッグ開始すると回転力UP。<br>④ 引っ張っている間にもう片方の指でタップするとキャンセル。</p>
-        <p><b>熟語合体</b>：暴＋走＝暴走など、対応する2文字を衝突させると合体。6種類の熟語と能力を選べます。</p>
+        <p><b>熟語合体</b>：暴＋走＝暴走など、対応する2文字を衝突させると合体。7種類の熟語と能力を選べます。</p>
         <p><b>攻撃</b>＝コマ同士の物理衝突（暴走の追尾中も攻撃）。<b>能力</b>＝衝撃波や渦巻による直接移動（鉄壁で軽減されない）。</p>
-        <p><b>能力</b>：6つの熟語の効果は「熟語の能力を見る」から確認できます。</p>
+        <p><b>能力</b>：7つの熟語の効果は「熟語の能力を見る」から確認できます。</p>
         <p><b>準備フェーズ</b>：最初の2ターンは中央の壁と四辺の封鎖壁で自陣を守り、能力発動はありません（合体可能）。</p><p><b>覚醒・サドンデス</b>：残り1コマが未合体なら覚醒。両者1コマずつになれば、以後1ターンごとに場外口が1コマ広がります。</p>
         <p><b>コツ</b>：↻↺で回転を選択。漢字の角を相手に当てると1.2倍のクリティカル！四辺中央の赤い開口部から相手を落とせば勝利。</p>
       </div>

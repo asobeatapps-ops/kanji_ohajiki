@@ -1,4 +1,4 @@
-/* 漢字おはじき Ver.1.5: dependency-free 2D compound-SAT impulse solver.
+/* 漢字おはじき Ver.1.6: dependency-free 2D compound-SAT impulse solver.
    World units: board coordinates 540 x 760. Time: seconds. Clockwise rotation is positive.
    Runs physics at a fixed 1/120 second timestep in game.js, render separately.
 */
@@ -11,17 +11,27 @@ const PIECE_UNIT=62;
 const FULL_SHOT_SPEED=230+875;
 const NORMAL_RESTITUTION=.73;
 const NORMAL_FULL_IMPULSE=(1+NORMAL_RESTITUTION)*FULL_SHOT_SPEED/2;
-const SHOCK_JUMP_PIECES=2, SHOCK_RADIUS_PIECES=1;
+const SHOCK_JUMP_PIECES=3, SHOCK_RADIUS_PIECES=1;
+const VORTEX_RADIUS_PIECES=1.5;
+const SPLIT_SCALES=[1,2/3,1/3];
+// Aim strength changes jump distance smoothly: weak shots ≈0.5 tile, full = 3 tiles.
+function shockJumpPieces(power){return .5+2.5*Math.pow(clamp(power,0,1),1.1)}
+function shockLanding(b,dx,dy,power){
+ const len=hypot(dx,dy)||1,travel=PIECE_UNIT*shockJumpPieces(power);
+ return {x:clamp(b.x+dx/len*travel,b.w*.65,W-b.w*.65),
+         y:clamp(b.y+dy/len*travel,b.h*.65,H-b.h*.65),travelPieces:shockJumpPieces(power)};
+}
 const SHOCK_JUMP_SECONDS=.5;
 const ABILITY_RULES=[
  {word:'暴走',kind:'追いかける',timing:'止まったあと、いちばん近い相手へ走ります。ぶつかると普通の攻撃です。',numbers:'追いかけ：1秒／攻撃：1倍'},
- {word:'衝撃',kind:'吹き飛ばす',timing:'2コマ先へ飛び、着地すると円の中の味方も相手も外側へ飛びます。',numbers:'着地：0.5秒後／円の広さ：半径1コマ／全員に100％の攻撃1回分'},
+ {word:'衝撃',kind:'吹き飛ばす',timing:'矢印を長く引くほど遠くへジャンプ！ 着地した円の中の全員を外へ飛ばします。',numbers:'ジャンプ：最大3コマ（引く強さで細かく調整）／着地：0.5秒後／円：半径1コマ／威力100％'},
  {word:'鉄壁',kind:'守る',timing:'ぶつかる攻撃には強い！ でも衝撃と渦巻では普通に動きます。',numbers:'自分が受ける攻撃：0.6倍／青・赤の円にいる味方：0.7倍／円の広さ：半径3コマ'},
- {word:'渦巻',kind:'ぐるぐる回す',timing:'相手に当てて止まると、周りの味方も相手もぐるぐる回ります。',numbers:'時間：1秒／2周／届く広さ：約1.9コマ'},
+ {word:'渦巻',kind:'ぐるぐる回す',timing:'相手にぶつけて止まると、中心から丸く広がる範囲の全員がぐるぐる回ります。',numbers:'時間：1秒／2周／届く範囲：中心から半径1.5コマの真円'},
  {word:'巨大',kind:'大きくなる',timing:'相手に当てるたび大きく、強くなります。最後まで元に戻りません。',numbers:'1回ごと：大きさ1.2倍・攻撃1.1倍／3回まで'},
- {word:'一撃',kind:'超強力な攻撃',timing:'相手にぶつけると大きく吹き飛ばせます。漢字の角ならもっと強力！',numbers:'普通に当てる：3倍／角で当てる：合計5倍'}
+ {word:'一撃',kind:'超強力な攻撃',timing:'最初にぶつかった敵1個だけを特大パワーで飛ばします。次の敵には普通の威力です。',numbers:'最初の敵：普通3倍／角なら合計5倍／2回目から通常'},
+ {word:'分裂',kind:'コマを増やす',timing:'敵に触れると2個に分かれます！ 相手の番でも分裂。小さいコマももう1回だけ分裂します。',numbers:'1個→2個（大きさ・攻撃2/3）→最大4個（大きさ・攻撃1/3）。1/3は分裂しない'}
 ];
-const WORDS={"暴走":{label:'暴走',ability:'burst'},"衝撃":{label:'衝撃',ability:'shock'},"鉄壁":{label:'鉄壁',ability:'iron'},"渦巻":{label:'渦巻',ability:'vortex'},"巨大":{label:'巨大',ability:'giant'},"一撃":{label:'一撃',ability:'strike'}};
+const WORDS={"暴走":{label:'暴走',ability:'burst'},"衝撃":{label:'衝撃',ability:'shock'},"鉄壁":{label:'鉄壁',ability:'iron'},"渦巻":{label:'渦巻',ability:'vortex'},"巨大":{label:'巨大',ability:'giant'},"一撃":{label:'一撃',ability:'strike'},"分裂":{label:'分裂',ability:'split'}};
 const mCan = document.createElement('canvas');mCan.width=300;mCan.height=110;
 const mCtx=mCan.getContext('2d',{willReadFrequently:true});
 const shapeCache=new Map();let idSeq=1;
@@ -61,7 +71,7 @@ function body({x,y,text,owner,word,merged=false,angle=0,vx=0,vy=0,omega=0}){
  const s=shapeFor(text),ability=merged?(WORDS[word]?.ability||null):null;
  const mass=merged?2.1:1;
  const inertia=mass*(s.w*s.w+s.h*s.h)/12;
- return {id:idSeq++,text,word,owner,merged,ability,x,y,vx,vy,angle,omega,mass,invM:1/mass,invI:1/inertia,w:s.w,h:s.h,parts:s.parts,radius:hypot(s.w,s.h)*.58+6,scale:1,growthStacks:0,lastGrowthTime:-100,shotDir:{x:1,y:0},burstAge:null,burstStage:null,homingLeft:0,burstFired:false,shockArmed:false,vortexArmed:false,vortexTriggered:false,awakened:false,awakenAt:-1,alive:true,merging:false,trail:[],trailTime:0,shotAt:-100,flash:0,jump:null,vortexHitEnemy:false};
+ return {id:idSeq++,text,word,owner,merged,ability,x,y,vx,vy,angle,omega,mass,invM:1/mass,invI:1/inertia,w:s.w,h:s.h,parts:s.parts,radius:hypot(s.w,s.h)*.58+6,scale:1,growthStacks:0,lastGrowthTime:-100,shotDir:{x:1,y:0},burstAge:null,burstStage:null,homingLeft:0,burstFired:false,shockArmed:false,vortexArmed:false,vortexTriggered:false,strikeSpent:false,strikeFirstEnemyId:null,splitTier:0,attackFactor:1,splitLockUntil:0,splitQueued:false,awakened:false,awakenAt:-1,alive:true,merging:false,trail:[],trailTime:0,shotAt:-100,flash:0,jump:null,vortexHitEnemy:false};
 }
 function staticRect(x,y,w,h){return {id:'wall',owner:-1,x,y,angle:0,vx:0,vy:0,omega:0,invM:0,invI:0,mass:Infinity,parts:[{x:0,y:0,w,h}],radius:hypot(w,h)/2,alive:true,static:true};}
 function walls(gx=184,gy=165,preparation=false){
@@ -151,12 +161,16 @@ function isCorner(attacker,point){
  return Math.abs(lx) > attacker.w*.32 && Math.abs(ly) > attacker.h*.30;
 }
 function attackMultiplier(world,attacker,isEnemy,corner){
- if(!isEnemy||!attacker||attacker.static||world.preparation||attacker.id!==world.shooterId)return corner?1.2:1;
- if(attacker.ability==='strike')return corner?5:3;
+ if(!isEnemy||!attacker||attacker.static||world.preparation)return corner?1.2:1;
+ // 分裂 fragments keep their own damage fraction, including during the opponent's turn.
+ if(attacker.ability==='split')return attacker.attackFactor;
+ if(attacker.id!==world.shooterId)return corner?1.2:1;
+ // The first enemy CONTACT only (not the first wall): after this, ordinary damage.
+ if(attacker.ability==='strike')return attacker.strikeSpent?(corner?1.2:1):(corner?5:3);
  const giant=attacker.ability==='giant'?Math.pow(1.1,Math.min(3,attacker.growthStacks+1)):1;
  return (corner?1.2:1)*giant;
 }
-function resolve(world,a,b,m,step,onImpact,attacker){
+function resolve(world,a,b,m,step,onImpact,attacker,splitRequests){
  const n=m.n,p=m.point,rA={x:p.x-a.x,y:p.y-a.y},rB={x:p.x-b.x,y:p.y-b.y};
  const inv=a.invM+b.invM;if(inv<EPS)return;
  const corr=Math.max(0,m.depth-0.4)*.53/inv;
@@ -169,11 +183,17 @@ function resolve(world,a,b,m,step,onImpact,attacker){
  const rac=cross(rA,n),rbc=cross(rB,n);const denom=inv+rac*rac*a.invI+rbc*rbc*b.invI;
  if(denom<EPS)return;
  const isEnemy=!a.static&&!b.static&&a.owner!==b.owner;
- const corner= !!(isEnemy&&attacker&&contactSpeed>165&&isCorner(attacker,p));
+ const corner=!!(isEnemy&&attacker&&attacker.ability!=='split'&&contactSpeed>165&&isCorner(attacker,p));
  const restitution=(a.static||b.static)?0.64:0.73;
  // Exact total hit strength: a launched '一撃' deals 3x, or 5x on a corner hit.
  // It must NOT multiply 3x by the universal 1.2x critical bonus.
- const skill=attackMultiplier(world,attacker,isEnemy,corner);
+ // Non-shooter split fragments can make attacks on either player's turn.
+ const aForward=Math.max(0,dot(va,n)),bForward=Math.max(0,-dot(vb,n));
+ const movingSplit=!attacker&&isEnemy?(aForward>=bForward?a:b):null;
+ const striker=attacker||(movingSplit?.ability==='split'?movingSplit:null);
+ const skill=attackMultiplier(world,striker,isEnemy,corner);
+ const firstStrike=!!(isEnemy&&!world.preparation&&attacker?.ability==='strike'&&attacker.id===world.shooterId&&!attacker.strikeSpent);
+ if(firstStrike){attacker.strikeSpent=true;attacker.strikeFirstEnemyId=(a===attacker?b:a).id;}
  if(!world.preparation&&isEnemy&&attacker&&attacker.ability==='vortex'&&attacker.id===world.shooterId&&contactSpeed>60)attacker.vortexHitEnemy=true;
  const impact=Math.min(20000,(-(1+restitution)*vn/denom)*skill);
  const imp={x:n.x*impact,y:n.y*impact};
@@ -188,7 +208,15 @@ function resolve(world,a,b,m,step,onImpact,attacker){
   if(tden>EPS){const slip=dot(vsub(newB,newA),tangent);const jt=clamp(-slip/tden,-impact*.26,impact*.26);
    applyImpulse(world,a,tangent.x*jt,tangent.y*jt,rA,-1,interaction);applyImpulse(world,b,tangent.x*jt,tangent.y*jt,rB,1,interaction)}
  }
- if(onImpact&&(contactSpeed>80||(attacker?.shockArmed&&attacker.id===world.shooterId)))onImpact({a,b,p,n,speed:contactSpeed,corner,impulse:impact,skill,step});
+ // The collision happens normally before the splitting animation/spawn.
+ // A split activates on contact during either player's turn, never in preparation.
+ if(isEnemy&&!world.preparation&&contactSpeed>12){
+  for(const tile of [a,b])if(tile.ability==='split'&&tile.splitTier<2&&!tile.splitQueued&&world.time>=tile.splitLockUntil){
+   tile.splitQueued=true;
+   splitRequests.push({piece:tile,hit:{x:p.x,y:p.y},normal:{x:n.x,y:n.y}});
+  }
+ }
+ if(onImpact&&(contactSpeed>80||firstStrike||(attacker?.shockArmed&&attacker.id===world.shooterId)))onImpact({a,b,p,n,speed:contactSpeed,corner,impulse:impact,skill,firstStrike,step});
 }
 function stepOnce(world,dt,hooks={}){
  const bodies=world.bodies,staticWalls=world.walls;world.time+=dt;
@@ -285,7 +313,7 @@ function stepOnce(world,dt,hooks={}){
   world.vortices[i].age+=dt;
   if(world.vortices[i].age>=world.vortices[i].duration)world.vortices.splice(i,1);
  }
- const merges=[];
+ const merges=[],splitRequests=[];
  for(let pass=0;pass<2;pass++){
   for(let i=0;i<bodies.length;i++){
    const a=bodies[i];if(!a.alive||a.merging||a.jump)continue;
@@ -297,18 +325,24 @@ function stepOnce(world,dt,hooks={}){
       a.merging=b.merging=true;merges.push([a,b]);break;
     }
     const attacker=a.id===world.shooterId?a:b.id===world.shooterId?b:null;
-    resolve(world,a,b,m,world.time,pass===0?hooks.impact:null,attacker);
+    resolve(world,a,b,m,world.time,pass===0?hooks.impact:null,attacker,splitRequests);
    }
   }
   for(const a of bodies){if(!a.alive||a.merging||a.jump)continue;
    for(const wall of staticWalls){
     if(Math.abs(a.x-wall.x)>a.radius+wall.parts[0].w/2||Math.abs(a.y-wall.y)>a.radius+wall.parts[0].h/2)continue;
     const m=manifold(a,wall);
-    if(m)resolve(world,a,wall,m,world.time,pass===0?hooks.impact:null,a.id===world.shooterId?a:null);
+    if(m)resolve(world,a,wall,m,world.time,pass===0?hooks.impact:null,a.id===world.shooterId?a:null,splitRequests);
    }
   }
  }
  for(const [a,b] of merges){if(a.alive&&b.alive)hooks.merge?.(a,b)}
+ // Execute spawns AFTER SAT passes so a new child is not hit during the same contact.
+ for(const req of splitRequests){
+  if(!req.piece.alive||req.piece.merging)continue;
+  const children=splitPiece(world,req.piece,req.normal);
+  if(children)hooks.split?.(req.piece,children,req.hit);
+ }
  // A piece exits only after its center has crossed outside one of four wall gaps.
  for(const b of bodies){if(!b.alive||b.merging)continue;
    const out=(b.x < -b.w*.4 || b.x>W+b.w*.4 || b.y< -b.h*.4 || b.y>H+b.h*.4);
@@ -361,6 +395,45 @@ function growGiant(world,b){
  b.flash=1;
  return true;
 }
+function splitPiece(world,parent,normal={x:1,y:0}){
+ if(world.preparation||!parent.alive||parent.ability!=='split'||parent.splitTier>=2)return null;
+ const nextTier=parent.splitTier+1,scale=SPLIT_SCALES[nextTier];
+ // Preserve total mass and linear momentum when one piece becomes two.
+ const halfMass=parent.mass/2,axis={x:-normal.y,y:normal.x};
+ const base=shapeFor(parent.text),childW=base.w*scale;
+ const offset=Math.max(23,childW/2+7);
+ const children=[];
+ for(const sign of [-1,1]){
+  const child=body({text:'分裂',word:'分裂',owner:parent.owner,merged:true,
+   x:parent.x+axis.x*offset*sign,y:parent.y+axis.y*offset*sign,
+   vx:parent.vx+axis.x*sign*85,vy:parent.vy+axis.y*sign*85,
+   omega:parent.omega+sign*1.3,angle:parent.angle+sign*.1});
+  child.splitTier=nextTier;child.attackFactor=scale;child.scale=scale;
+  child.w=base.w*scale;child.h=base.h*scale;
+  child.parts=base.parts.map(p=>({x:p.x*scale,y:p.y*scale,w:p.w*scale,h:p.h*scale}));
+  child.radius=hypot(child.w,child.h)*.58+6;
+  child.mass=halfMass;child.invM=1/halfMass;
+  child.invI=12/(halfMass*(child.w**2+child.h**2));
+  child.splitLockUntil=world.time+.26;child.shotAt=parent.shotAt;
+  child.isLaunched=parent.isLaunched;child.flash=1;
+  // Keep the two fragments inside the bounded portions of the playfield.
+  child.x=clamp(child.x,child.w*.48,W-child.w*.48);
+  child.y=clamp(child.y,child.h*.48,H-child.h*.48);
+  children.push(child);
+ }
+ parent.alive=false;parent.splitQueued=false;
+ if(world.shooterId===parent.id)world.shooterId=children[0].id;
+ world.bodies.push(...children);
+ // When a piece splits while vortexed, keep BOTH new fragments in the vortex.
+ for(const v of world.vortices){
+  const old=v.targets.find(t=>t.id===parent.id);if(!old)continue;
+  v.targets=v.targets.filter(t=>t.id!==parent.id);
+  for(const child of children)v.targets.push({id:child.id,
+   angle:Math.atan2(child.y-v.center.y,child.x-v.center.x)-4*Math.PI*v.age/v.duration,
+   radius:Math.max(18,hypot(child.x-v.center.x,child.y-v.center.y)-v.expand*v.age/v.duration)});
+ }
+ return children;
+}
 function retargetVortices(world,retiredIds,replacement){
  // Preserve swirling enemies when they transform via awakening or fusion mid-animation.
  for(const vortex of world.vortices){
@@ -376,7 +449,7 @@ function retargetVortices(world,retiredIds,replacement){
 function startVortex(world,b){
  if(world.preparation||!b||!b.alive||b.ability!=='vortex'||!b.vortexArmed||!b.vortexHitEnemy||b.vortexTriggered)return null;
  b.vortexArmed=false;b.vortexTriggered=true;
- const range=235/2;
+ const range=PIECE_UNIT*VORTEX_RADIUS_PIECES;
  const targets=world.bodies.filter(p=>p.alive&&p.id!==b.id&&hypot(p.x-b.x,p.y-b.y)<=range)
  .map(p=>({id:p.id,angle:Math.atan2(p.y-b.y,p.x-b.x),radius:Math.max(18,hypot(p.x-b.x,p.y-b.y))}));
  const v={sourceId:b.id,owner:b.owner,center:{x:b.x,y:b.y},age:0,duration:1.0,expand:46,range,targets};
@@ -406,12 +479,12 @@ function fire(world,b,dx,dy,power,spin,spinStrength=1){
  b.homingLeft=0;b.burstFired=false;
  b.shockArmed=!world.preparation&&b.ability==='shock';
  b.vortexArmed=!world.preparation&&b.ability==='vortex';b.vortexTriggered=false;b.vortexHitEnemy=false;
- b.jump=null;
+ b.jump=null;b.strikeSpent=false;b.strikeFirstEnemyId=null;
  if(b.shockArmed){
-  const from={x:b.x,y:b.y},to={x:clamp(b.x+b.shotDir.x*PIECE_UNIT*SHOCK_JUMP_PIECES,b.w*.65,W-b.w*.65),
-   y:clamp(b.y+b.shotDir.y*PIECE_UNIT*SHOCK_JUMP_PIECES,b.h*.65,H-b.h*.65)};
+  const from={x:b.x,y:b.y},landing=shockLanding(b,dx,dy,amount);
+  const to={x:landing.x,y:landing.y};
   b.vx=0;b.vy=0;
-  b.jump={from,to,age:0,duration:SHOCK_JUMP_SECONDS};
+  b.jump={from,to,age:0,duration:SHOCK_JUMP_SECONDS,power:amount,travelPieces:landing.travelPieces};
  }
 
  world.shooterId=b.id;world.lastShooterOwner=b.owner;world.shotTime=world.time;
@@ -482,11 +555,11 @@ function evaluateShot(world, shooter,dir,power,spin){
  const actor=bs.find(b=>b.src);if(!actor)return -Infinity;
  let speed=(230+875*Math.pow(power,1.12)),len=hypot(dir.x,dir.y)||1;
  actor.vx=dir.x/len*speed;actor.vy=dir.y/len*speed;
- // CPU predictor mirrors the two-piece shock landing and its one-piece-radius skill.
+ // CPU predictor uses the same power-dependent jump destination as the actual shot.
  // This is an inexpensive planning approximation; the real move still uses the SAT engine.
  if(!world.preparation&&shooter.ability==='shock'){
-  actor.x=clamp(actor.x+dir.x/len*PIECE_UNIT*SHOCK_JUMP_PIECES,shooter.w*.65,W-shooter.w*.65);
-  actor.y=clamp(actor.y+dir.y/len*PIECE_UNIT*SHOCK_JUMP_PIECES,shooter.h*.65,H-shooter.h*.65);
+  const landing=shockLanding(shooter,dir.x,dir.y,power);
+  actor.x=landing.x;actor.y=landing.y;
   actor.vx=0;actor.vy=0;
   for(const target of bs){if(target===actor)continue;
    const dx=target.x-actor.x,dy=target.y-actor.y,dist=hypot(dx,dy);
@@ -539,12 +612,49 @@ function evaluateShot(world, shooter,dir,power,spin){
  const enemy=1-shooter.owner;
  score+=(n0[enemy]-after[enemy])*225-(n0[shooter.owner]-after[shooter.owner])*225;
  score+=doneMerges*(world.preparation?110:26);
- if(!world.preparation&&shooter.ability==='vortex')score+=bs.filter(b=>b.alive&&b.owner!==shooter.owner&&hypot(b.x-actor.x,b.y-actor.y)<117.5).length*18;
+ if(!world.preparation&&shooter.ability==='vortex')score+=bs.filter(b=>b.alive&&b.owner!==shooter.owner&&hypot(b.x-actor.x,b.y-actor.y)<=PIECE_UNIT*VORTEX_RADIUS_PIECES).length*18;
  if(!world.preparation&&shooter.ability==='shock')score+=bs.filter(b=>b.alive&&b.owner!==shooter.owner&&hypot(b.x-actor.x,b.y-actor.y)<62).length*16;
  if(!world.preparation&&shooter.ability==='iron')score+=bs.filter(b=>b.alive&&b.owner===shooter.owner&&hypot(b.x-actor.x,b.y-actor.y)<186).length*8;
+ if(!world.preparation&&shooter.ability==='split')score+=bs.filter(b=>b.alive&&b.owner!==shooter.owner&&hypot(b.x-actor.x,b.y-actor.y)<82).length*18;
  const movement=hypot(actor.x-shooter.x,actor.y-shooter.y);
  score+=Math.min(movement,250)*.018;
  return score;
 }
-global.KanjiPhysics={W,H,WORDS,PIECE_UNIT,FULL_SHOT_SPEED,NORMAL_FULL_IMPULSE,shockFullImpulse,attackMultiplier,SHOCK_JUMP_PIECES,SHOCK_RADIUS_PIECES,SHOCK_JUMP_SECONDS,ABILITY_RULES,body,newWorld,spawnInitial,step,fire,settle,remaining,allStopped,createMerged,triggerShock,awakenPiece,shapeFor,manifold,evaluateShot,finishTurn,openArena,expandGates,defenseFactor,fieldPosition,growGiant,startVortex,clamp};
+// End-of-turn state serialization for online matches. All subsequent physics
+// runs from an authoritative snapshot. Never store transient trails or wall bodies.
+function packWorld(world){
+ const bKeys=['id','text','word','owner','merged','ability','x','y','vx','vy','angle','omega','mass','invM','invI','w','h','radius','scale','growthStacks','lastGrowthTime','shotDir','burstAge','burstStage','homingLeft','burstFired','shockArmed','vortexArmed','vortexTriggered','strikeSpent','strikeFirstEnemyId','splitTier','attackFactor','splitLockUntil','splitQueued','awakened','awakenAt','alive','shotAt','isLaunched','vortexHitEnemy'];
+ return {
+  time:world.time,preparation:world.preparation,prepTurns:world.prepTurns,
+  gateX:world.gateX,gateY:world.gateY,suddenDeath:world.suddenDeath,suddenTurns:world.suddenTurns,
+  shooterId:world.shooterId,lastShooterOwner:world.lastShooterOwner,shotTime:world.shotTime,
+  awakenedOwners:[...world.awakenedOwners],fields:world.fields.map(f=>({...f})),
+  bodies:world.bodies.filter(b=>b.alive).map(b=>{
+   const obj={};for(const k of bKeys)if(b[k]!==undefined)obj[k]=b[k];return obj;
+  })
+ };
+}
+function unpackWorld(snapshot){
+ if(!snapshot||!Array.isArray(snapshot.bodies)||snapshot.bodies.length>72)throw Error('盤面データが不正です');
+ const w=newWorld();
+ for(const key of ['time','preparation','prepTurns','gateX','gateY','suddenDeath','suddenTurns','shooterId','lastShooterOwner','shotTime']){
+  if(snapshot[key]!==undefined)w[key]=snapshot[key];
+ }
+ w.awakenedOwners=new Set(snapshot.awakenedOwners||[]);
+ w.fields=(snapshot.fields||[]).map(f=>({...f}));
+ w.bodies=snapshot.bodies.map(raw=>{
+  if(!raw.alive||!WORDS[raw.word]||![0,1].includes(raw.owner)||!Number.isFinite(raw.x)||!Number.isFinite(raw.y)||!Number.isFinite(raw.id))throw Error('コマの状態が不正です');
+  const b=body({x:raw.x,y:raw.y,text:raw.text,word:raw.word,owner:raw.owner,merged:raw.merged,angle:raw.angle});
+  Object.assign(b,raw);
+  const shape=shapeFor(b.text),scale=b.scale||1;
+  b.parts=shape.parts.map(part=>({x:part.x*scale,y:part.y*scale,w:part.w*scale,h:part.h*scale}));
+  b.trail=[];b.trailTime=0;b.flash=0;b.merging=false;b.jump=null;
+  return b;
+ });
+ idSeq=Math.max(idSeq,...w.bodies.map(b=>b.id+1),1);
+ w.walls=walls(w.gateX,w.gateY,w.preparation);
+ w.shocks=[];w.vortices=[];
+ return w;
+}
+global.KanjiPhysics={packWorld,unpackWorld,W,H,WORDS,PIECE_UNIT,FULL_SHOT_SPEED,NORMAL_FULL_IMPULSE,shockFullImpulse,attackMultiplier,SHOCK_JUMP_PIECES,SHOCK_RADIUS_PIECES,SHOCK_JUMP_SECONDS,shockJumpPieces,shockLanding,VORTEX_RADIUS_PIECES,SPLIT_SCALES,splitPiece,ABILITY_RULES,body,newWorld,spawnInitial,step,fire,settle,remaining,allStopped,createMerged,triggerShock,awakenPiece,shapeFor,manifold,evaluateShot,finishTurn,openArena,expandGates,defenseFactor,fieldPosition,growGiant,startVortex,clamp};
 })(window);

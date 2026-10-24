@@ -1,12 +1,16 @@
-/* 漢字おはじき Ver.1.5 | ASOBEAT — preparation and sudden death */
+/* 漢字おはじき Ver.1.7 | ASOBEAT — preparation and sudden death */
 (function(){'use strict';
 const P=window.KanjiPhysics;if(!P){document.body.textContent='物理エンジンを読み込めませんでした。';return;}
-const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'停止後1秒・敵を自動追尾','衝撃':'0.5秒で2コマ跳躍→半径1コマの能力衝撃波','鉄壁':'物理攻撃だけ軽減（能力は通常どおり）','渦巻':'敵に命中後1秒の渦','巨大':'命中で1.2倍巨大化（最大3回）','一撃':'当てると3倍！角なら5倍！'};
+const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'停止後1秒・敵を自動追尾','衝撃':'引く強さで0.5〜3コマジャンプ・着地後に衝撃波','鉄壁':'ぶつかる攻撃を軽減（能力は普通に受ける）','渦巻':'敵に当てて止まると半径1.5コマの真円に渦','巨大':'命中で1.2倍巨大化（最大3回）','一撃':'最初の敵だけ3倍！角なら5倍！','分裂':'敵に触れると2個に！もう一度分裂して最大4個'};
 const $=id=>document.getElementById(id),ctx=$('board').getContext('2d',{alpha:false});
 const {W,H}=P,PI=Math.PI,TAU=PI*2,clamp=P.clamp;
-const scenes=['home','setup','confirm','game','result'];
+const scenes=['home','match','onlineDeck','setup','confirm','game','result'];
 const st={scene:'home',mode:'solo',diff:'normal',decks:[['暴走','衝撃','鉄壁'],['衝撃','鉄壁','暴走']],names:['青チーム','CPU'],world:null,phase:'title',turn:0,spin:1,drag:null,selected:null,fx:[],texts:[],bannerUntil:0,shake:0,flash:0,hitstop:0,time:0,acc:0,moving:0,still:0,shotCount:0,stats:{outs:[0,0],merges:[0,0],crits:[0,0],awakens:[0,0]},vortexPlayed:false,turnToken:0,sound:true,result:null,geom:null};
 let audio=null,noiseBuffer=null,animLast=0,rafId=0;let timers=[];
+const online={active:false,role:null,uid:null,slot:null,round:0,seq:-1,seenMoveId:null,ownShotId:null,starting:false,revealing:false,publishing:false,resetting:false,committed:false,rematch:false,gameReady:false,pendingRoom:null,lastError:''};
+let onlineDeck=['暴走','衝撃','鉄壁'];
+try{let prior=JSON.parse(localStorage.getItem('asobeat_kanji_online_deck')||'null');if(Array.isArray(prior)&&prior.length===3&&prior.every(w=>WORDS.includes(w)))onlineDeck=prior}catch{}
+
 function later(fn,ms){const token=st.turnToken;const id=setTimeout(()=>{timers=timers.filter(x=>x!==id);if(token===st.turnToken)fn()},ms);timers.push(id);return id}
 function cancelAsync(){st.turnToken++;for(const id of timers)clearTimeout(id);timers=[]}
 function safeLoad(){try{return JSON.parse(localStorage.getItem('asobeat_kanji_v10')||'{}')}catch(e){return {}}}
@@ -67,11 +71,11 @@ function sound(type,magnitude=1){if(!st.sound)return;initAudio();
  if(type==='win'){for(let i=0;i<4;i++)note([392,523,659,784][i],.33,.095,'triangle',i*.09)}
  if(type==='tap')note(450,.06,.035,'triangle',0,580);
 }
-function roulette(){
+function roulette(fixedFirst=null,after=null){
  cancelAsync();initAudio();const bits=new Uint32Array(1);
  try{crypto.getRandomValues(bits)}catch(e){bits[0]=(Math.random()*4294967296)>>>0}
- const sector=bits[0]%4,first=sector%2;
- st.phase='roulette';$('roulette').classList.remove('hidden');
+ const sector=fixedFirst===null?bits[0]%4:((bits[0]%2)*2+fixedFirst),first=sector%2;
+ st.phase=after?'onlineRoulette':'roulette';$('roulette').classList.remove('hidden');
  $('rouletteText').textContent='先攻を決定中…';
  const wheel=$('rouletteWheel');wheel.style.transition='none';wheel.style.transform='rotate(0deg)';
  // Each of the four colored sectors has exactly 1/4 probability.
@@ -81,7 +85,7 @@ function roulette(){
  }));
  for(let i=0;i<10;i++)later(()=>sound('tap'),i*190);
  later(()=>{$('rouletteText').textContent=(first===0?'🔵 青':'🔴 赤')+'が先攻！';sound('merge')},2240);
- later(()=>startMatch(first),3000);
+ later(()=>after?after():startMatch(first),3000);
 }
 
 function makeNames(){for(let i=0;i<2;i++)$('gameName'+i).textContent=st.names[i]}
@@ -105,10 +109,26 @@ function beginTurn(){if(st.phase==='result'||!st.world)return;st.phase='playing'
  $('hintLabel').textContent='② 好きな位置からドラッグ／2本指タップで中止';
  $('aimHint').classList.add('hidden');$('spinMeter').textContent='回転力 --';updateFieldStatus();
  const cpu=st.mode==='solo'&&st.turn===1;
- for(const id of ['spinRight','spinLeft'])$(id).disabled=cpu;
+ const remote=st.mode==='online'&&st.turn!==online.slot;
+ if(remote){$('phaseText').textContent='相手の操作を待っています';$('selectedLabel').textContent='相手のターン';$('hintLabel').textContent='相手が発射するまで待ちましょう';}
+ for(const id of ['spinRight','spinLeft'])$(id).disabled=cpu||remote;
  updateHud();if(cpu)later(cpuTakeTurn,550);
 }
-function fireShot(b,dirX,dirY,power,spin,spinStrength=1){if(st.phase!=='playing'||!b||!b.alive||b.owner!==st.turn)return false;
+function fireShot(b,dirX,dirY,power,spin,spinStrength=1,fromNetwork=false){
+ if(st.mode==='online'&&!fromNetwork){
+  if(st.phase!=='playing'||!b||!b.alive||b.owner!==online.slot||st.turn!==online.slot)return false;
+  if(!window.KanjiOnline){showNetworkStatus('Firebaseの読み込みを確認してください','error');return false;}
+  const len=Math.hypot(dirX,dirY);if(len<.01||power<.06)return false;
+  const move={bodyId:b.id,dx:dirX/len,dy:dirY/len,power,spin,spinStrength};
+  st.phase='sending';showNetworkStatus('発射情報を相手へ送っています…','pending');
+  window.KanjiOnline.sendShot(move).then(shot=>{
+   if(st.mode!=='online'||!online.active)return;
+   online.ownShotId=shot.id;online.seenMoveId=shot.id;
+   st.phase='playing';fireShot(b,move.dx,move.dy,power,spin,spinStrength,true);
+  }).catch(e=>{st.phase='playing';const msg=networkError(e);showNetworkStatus(msg,'error');toast(msg)});
+  return true;
+ }
+ if(st.phase!=='playing'||!b||!b.alive||b.owner!==st.turn)return false;
  const len=Math.hypot(dirX,dirY);if(len<.01||power<.06)return false;
  P.fire(st.world,b,dirX,dirY,power,spin,spinStrength);st.vortexPlayed=false;st.shotCount++;st.phase='moving';st.moving=0;st.still=0;st.acc=0;st.selected=null;st.drag=null;
  $('phaseText').textContent='物理演算中…';$('selectedLabel').textContent=b.text+'、発射！';$('hintLabel').textContent='全コマが止まると交代';
@@ -117,11 +137,12 @@ function fireShot(b,dirX,dirY,power,spin,spinStrength=1){if(st.phase!=='playing'
  if(b.ability==='iron'&&!st.world.preparation)showEffect('鉄壁：自ターン終了時に護陣！',900);
  if(b.ability==='vortex'&&!st.world.preparation)showEffect('渦巻：敵に命中後、停止時に渦！',850);
  if(b.ability==='giant'&&!st.world.preparation)showEffect('巨大：敵への命中で巨大化！',800);
- if(b.ability==='strike'&&!st.world.preparation)showEffect('一撃：普通は3倍・角なら5倍！',800);
+ if(b.ability==='strike'&&!st.world.preparation)showEffect('一撃：最初の敵だけ3倍・角なら5倍！',850);
+ if(b.ability==='split'&&!st.world.preparation)showEffect('分裂：敵に触れると2つに増える！',850);
  return true;
 }
 function collisionHooks(){return {
- impact:({a,b,p,speed,corner,impulse})=>{
+ impact:({a,b,p,speed,corner,impulse,skill,firstStrike})=>{
   const shooter=(a.id===st.world.shooterId?a:b.id===st.world.shooterId?b:null);
   // Collisions may generate adjacent contact manifolds: one SFX per pair / 120 ms.
   const key=a.static?'w'+b.id:b.static?'w'+a.id:[a.id,b.id].sort((x,y)=>x-y).join('_');
@@ -134,13 +155,21 @@ function collisionHooks(){return {
      addRing(shooter.x,shooter.y,'#eac864',shooter.radius*1.7);addParticles(shooter.x,shooter.y,23,'#ffd774',1.3);
      st.flash=.20;showText('巨大化 ×'+shooter.growthStacks,shooter.x,shooter.y,'#fff2b4');showEffect('巨大化 '+shooter.growthStacks+'/3 !!',850);sound('merge');
     }
-    if(shooter.ability==='strike'&&!corner){
+    if(shooter.ability==='strike'&&firstStrike&&!corner){
      addParticles(p.x,p.y,22,'#ffc064',1.25);showText('一撃 ×3!!',p.x,p.y,'#ffe5a8');st.shake=Math.max(st.shake,7);sound('crit');
     }
   }
   if(corner){
-   if(shooter&&a.owner!==b.owner&&!a.static&&!b.static){st.stats.crits[shooter.owner]++;st.hitstop=Math.max(st.hitstop,.05);st.flash=.26;showText(shooter.ability==='strike'?'CRITICAL ×5!!':'CRITICAL ×1.2!',p.x,p.y,'#fff1a2');sound('crit');}
+   if(shooter&&a.owner!==b.owner&&!a.static&&!b.static){st.stats.crits[shooter.owner]++;st.hitstop=Math.max(st.hitstop,.05);st.flash=.26;showText(shooter.ability==='strike'&&firstStrike?'CRITICAL ×5!!':'CRITICAL ×1.2!',p.x,p.y,'#fff1a2');sound('crit');}
   }else if(big){sound('impact',speed/300);if(speed>420)st.hitstop=Math.max(st.hitstop,.022)}
+ },
+ split:(parent,children,point)=>{
+  const tier=children[0].splitTier,label=tier===1?'2/3':'1/3';
+  addRing(parent.x,parent.y,parent.owner===0?'#63bafb':'#ec7d82',parent.radius*1.5);
+  addParticles(parent.x,parent.y,25,parent.owner===0?'#6bcfff':'#ff98a0',1.3);
+  st.shake=Math.max(st.shake,4);st.flash=Math.max(st.flash,.16);
+  showText('分裂！×2',parent.x,parent.y,'#ffe4a1');
+  showEffect(`分裂！ ${label}サイズが2個！`,1000);sound('merge');updateHud();
  },
  merge:(a,b)=>{
   if(st.phase==='result')return;
@@ -187,18 +216,20 @@ function tickPhysics(dt){if(st.hitstop>0){st.hitstop=Math.max(0,st.hitstop-dt);r
     const v=P.startVortex(st.world,shooter);
     if(v){
      st.still=0;st.moving=0;st.acc=0;
-     addRing(shooter.x,shooter.y,'#a875ed',P.PIECE_UNIT*1.9);addParticles(shooter.x,shooter.y,26,'#9c78ef',1.1);
+     addRing(shooter.x,shooter.y,'#a875ed',v.range);addParticles(shooter.x,shooter.y,26,'#9c78ef',1.1);
      showEffect('渦巻・周囲の全員を1秒旋回！',950);sound('shock');return;
     }
    }
-   P.settle(st.world);st.acc=0;finishShot();
+   P.settle(st.world);st.acc=0;
+   if(st.mode==='online'&&st.turn!==online.slot){st.phase='syncing';showNetworkStatus('相手の確定盤面を受信中…','pending');return;}
+   finishShot();
  }
 
 }
 function finishShot(){
  if(!st.world||st.phase!=='moving')return;
  const world=st.world,n0=P.remaining(world,0),n1=P.remaining(world,1);
- if(n0===0||n1===0){finishGame(n0===0&&n1===0?-1:n0===0?1:0);return;}
+ if(n0===0||n1===0){finishGame(n0===0&&n1===0?-1:n0===0?1:0);if(st.mode==='online')publishOnlineTurn();return;}
  const wasPreparation=world.preparation;
  if(wasPreparation){
   world.prepTurns++;
@@ -223,11 +254,13 @@ function finishShot(){
   $('suddenOverlay').classList.remove('hidden');
   $('suddenOverlay').setAttribute('aria-hidden','false');sound('out');
   updateHud();updateFieldStatus();
+  if(st.mode==='online')publishOnlineTurn();
   later(()=>{if(st.scene!=='game'||st.phase!=='sudden')return;
    $('suddenOverlay').classList.add('hidden');$('suddenOverlay').setAttribute('aria-hidden','true');beginTurn();},2000);
   return;
  }
  beginTurn();
+ if(st.mode==='online')publishOnlineTurn();
 }
 
 function updateFieldStatus(){
@@ -285,7 +318,7 @@ function cpuTakeTurn(){if(!st.world||st.phase!=='playing'||st.turn!==1||st.mode!
  later(()=>fireShot(choice.b,Math.cos(a),Math.sin(a),choice.power,choice.spin),650);
 }
 function boardPoint(evt){const r=$('board').getBoundingClientRect();return{x:(evt.clientX-r.left)*W/r.width,y:(evt.clientY-r.top)*H/r.height}}
-function selectable(){return st.scene==='game'&&st.phase==='playing'&&!(st.mode==='solo'&&st.turn===1)}
+function selectable(){return st.scene==='game'&&st.phase==='playing'&&!(st.mode==='solo'&&st.turn===1)&&!(st.mode==='online'&&st.turn!==online.slot)}
 function findSelected(pos){if(!st.world)return null;let best=null,dist=Infinity;
  for(const b of st.world.bodies){if(!b.alive||b.owner!==st.turn)continue;
   const d=Math.hypot(b.x-pos.x,b.y-pos.y),allowed=Math.max(b.w,b.h)*.68+15;
@@ -293,7 +326,7 @@ function findSelected(pos){if(!st.world)return null;let best=null,dist=Infinity;
  }return best;
 }
 function selectPiece(b){st.selected=b;st.drag=null;
- $('selectedLabel').textContent=b.merged?`『${b.text}』${b.ability==='giant'?' Lv'+b.growthStacks:''} を選択`:`「${b.text}」を選択`;
+ $('selectedLabel').textContent=b.merged?`『${b.text}』${b.ability==='giant'?' Lv'+b.growthStacks:b.ability==='split'&&b.splitTier?' '+(b.splitTier===1?'2/3':'1/3')+'サイズ':''} を選択`:`「${b.text}」を選択`;
  $('hintLabel').textContent='盤面の外からでもドラッグして発射！';
  $('aimHint').textContent=`${b.text} を選択中 · 好きな位置で逆方向に引っ張ろう`;
  $('aimHint').classList.remove('hidden');
@@ -425,6 +458,7 @@ function drawPiece(b){const color=b.owner===0?'#2473ab':'#c7504f',dark=b.owner==
   if(b.ability==='iron'){ctx.lineWidth=2;ctx.strokeStyle='#d1ab66cc';ctx.strokeRect(-b.w*.53/scale,-b.h*.57/scale,b.w*1.06/scale,b.h*1.14/scale)}
   if(b.ability==='giant'){ctx.strokeStyle='#dcac39';ctx.lineWidth=2;ctx.strokeRect(-b.w*.52/scale,-b.h*.52/scale,b.w*1.04/scale,b.h*1.04/scale)}
   if(b.ability==='vortex'){ctx.strokeStyle='#9875ca';ctx.lineWidth=2;ctx.beginPath();ctx.arc(0,0,Math.max(b.w,b.h)*.68/scale,0,TAU);ctx.stroke()}
+  if(b.ability==='split'){ctx.strokeStyle=b.owner===0?'#6dc4ee':'#e993ac';ctx.lineWidth=2.5/scale;ctx.beginPath();ctx.arc(0,0,Math.max(b.w,b.h)*.53/scale,0,TAU);ctx.stroke()}
  const shape=P.shapeFor(b.text),font=`1000 ${shape.fontSize}px "Noto Sans CJK JP","Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif`;
  ctx.font=font;ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineJoin='round';ctx.miterLimit=2;
  ctx.shadowColor='#3928215c';ctx.shadowOffsetX=3.5;ctx.shadowOffsetY=6;ctx.shadowBlur=4;ctx.lineWidth=7;ctx.strokeStyle='#f2e6d3';ctx.strokeText(b.text,0,shape.centerOffsetY);ctx.shadowColor='transparent';ctx.shadowOffsetY=0;ctx.shadowOffsetX=0;ctx.shadowBlur=0;
@@ -433,6 +467,10 @@ function drawPiece(b){const color=b.owner===0?'#2473ab':'#c7504f',dark=b.owner==
  ctx.fillStyle=color;ctx.fillText(b.text,0,shape.centerOffsetY);
  if(b.flash>0){ctx.globalAlpha=b.flash*.6;ctx.fillStyle='#fff';ctx.fillText(b.text,0,shape.centerOffsetY)}
  ctx.restore();
+ if(b.ability==='split'&&b.splitTier){
+  ctx.fillStyle=b.owner===0?'#176e9e':'#ab3948';ctx.font='900 13px sans-serif';ctx.textAlign='center';
+  ctx.fillText(b.splitTier===1?'2/3':'1/3',0,b.h*.6+12);
+ }
 }
 function drawFields(){
  for(const f of st.world.fields){const p=P.fieldPosition(st.world,f),r=f.radius;
@@ -448,6 +486,9 @@ function drawFields(){
 function drawVortices(){
  for(const v of st.world.vortices){
   const alpha=1-v.age/v.duration;ctx.save();ctx.translate(v.center.x,v.center.y);
+  // Exactly circular ability hit zone, matching the physics selection radius.
+  ctx.beginPath();ctx.arc(0,0,v.range,0,TAU);ctx.fillStyle=`rgba(138,85,217,${.05*alpha})`;ctx.fill();
+  ctx.strokeStyle=`rgba(138,85,217,${.55*alpha})`;ctx.lineWidth=2;ctx.setLineDash([6,7]);ctx.stroke();ctx.setLineDash([]);
   ctx.strokeStyle=`rgba(138,85,217,${.38+.55*alpha})`;ctx.lineWidth=4;ctx.shadowColor='#a785fa';ctx.shadowBlur=9;
   for(let arm=0;arm<3;arm++){ctx.beginPath();for(let i=0;i<=55;i++){
    const theta=(i/55)*Math.PI*4+arm*2*Math.PI/3+v.age*2;
@@ -473,13 +514,13 @@ function drawDrag(){const d=st.drag;if(!d||!d.body||!d.body.alive)return;const l
  ctx.fillStyle=st.turn===0?'#2580bd':'#cb4e4b';ctx.beginPath();ctx.moveTo(endx+dx*19,endy+dy*19);ctx.lineTo(endx-dy*13-dx*6,endy+dx*13-dy*6);ctx.lineTo(endx+dy*13-dx*6,endy-dx*13-dy*6);ctx.closePath();ctx.fill();
  // No line back to the finger: display only the shot direction arrow.
  if(d.body.ability==='shock'&&!st.world.preparation){
-  const px=clamp(x+dx*P.PIECE_UNIT*P.SHOCK_JUMP_PIECES,d.body.w*.65,W-d.body.w*.65);
-  const py=clamp(y+dy*P.PIECE_UNIT*P.SHOCK_JUMP_PIECES,d.body.h*.65,H-d.body.h*.65);
+  const landing=P.shockLanding(d.body,dx,dy,d.power);
+  const px=landing.x,py=landing.y;
   ctx.setLineDash([7,5]);ctx.shadowBlur=0;ctx.lineWidth=3;
   ctx.strokeStyle='#2caac8';ctx.fillStyle='#57d9ee1f';
   ctx.beginPath();ctx.arc(px,py,P.PIECE_UNIT*P.SHOCK_RADIUS_PIECES,0,TAU);ctx.fill();ctx.stroke();
   ctx.setLineDash([]);ctx.font='900 14px sans-serif';ctx.textAlign='center';
-  ctx.fillStyle='#15718f';ctx.fillText('着地予測・2コマ先',px,clamp(py-P.PIECE_UNIT*P.SHOCK_RADIUS_PIECES-10,18,H-20));
+  ctx.fillStyle='#15718f';ctx.fillText(`着地 ${landing.travelPieces.toFixed(1)}コマ先`,px,clamp(py-P.PIECE_UNIT*P.SHOCK_RADIUS_PIECES-10,18,H-20));
  }
  ctx.restore();
  ctx.textAlign='center';ctx.fillStyle='#293747ed';ctx.font='950 16px system-ui';
@@ -520,13 +561,211 @@ function mainLoop(ts){let dt=animLast?Math.min(.06,(ts-animLast)/1000):.016;anim
  if(st.scene==='game'){if(st.phase==='moving')tickPhysics(dt);renderFx(dt);paint(dt)}
  rafId=requestAnimationFrame(mainLoop)
 }
+// ===== Online mode: matchmaking, hidden deck lock, turn-by-turn sync =====
+const freshStats=()=>({outs:[0,0],merges:[0,0],crits:[0,0],awakens:[0,0]});
+const networkError=e=>window.KanjiOnline?.errorMessage?.(e)||String(e?.message||e||'通信エラー');
+function showNetworkStatus(text,kind=''){const el=$('onlineGameStatus');if(st.mode!=='online'){el.className='online-game-status hidden';return;}el.className='online-game-status '+kind;el.textContent=text;}
+function onlineUIError(msg){$('matchError').textContent=msg;$('matchError').classList.remove('hidden');}
+function openOnlineMatch(){
+ cancelAsync();st.mode='online';st.phase='match';st.world=null;
+ $('onlineName').value=st.names[0]==='CPU'?'匿名':st.names[0]||'匿名';
+ $('roomCode').value='';$('matchError').classList.add('hidden');$('waitingPanel').classList.add('hidden');
+ $('roomJoinBtn').disabled=false;changeScene('match');
+}
+async function joinOnlineRoom(){
+ const net=window.KanjiOnline,code=$('roomCode').value,name=escName($('onlineName').value,'匿名');
+ $('matchError').classList.add('hidden');
+ if(!/^[\u3041-\u3096\u30a1-\u30fa\u30fc]{3,10}$/u.test(code)){onlineUIError('合言葉は、ひらがな・カタカナだけで3〜10文字にしてください。');return;}
+ if(!net){onlineUIError('Firebaseを読み込み中、またはネットワークが使えません。接続を確認してもう一度押してください。');return;}
+ $('roomJoinBtn').disabled=true;$('roomJoinBtn').textContent='接続しています…';
+ try{
+  st.names[0]=name;save();net.setListener(handleOnlineRoom);
+  const connected=await net.connect(code,name);online.active=true;online.role=connected.role;online.uid=connected.uid;
+  online.slot=connected.role==='host'?0:1;online.round=0;online.seq=-1;online.seenMoveId=null;
+  online.ownShotId=null;online.starting=false;online.revealing=false;online.publishing=false;online.rematch=false;online.committed=false;online.gameReady=false;
+  $('waitingPanel').classList.remove('hidden');$('roomJoinBtn').classList.add('hidden');
+  $('waitingHeadline').textContent='友達の参加を待っています…';
+  $('waitingSub').textContent='同じ合言葉を入力してもらってください';
+  window.KanjiPractice?.start();
+  if(net.latest)handleOnlineRoom(net.latest,{});
+ }catch(e){$('roomJoinBtn').disabled=false;$('roomJoinBtn').textContent='合言葉でマッチング →';onlineUIError(networkError(e));}
+}
+function onlineDeckSelect(){const host=$('onlineDeckOptions');host.textContent='';
+ for(let i=0;i<3;i++){
+  const box=document.createElement('div');box.className='deck-slot';
+  const title=document.createElement('span');title.className='slot-heading';title.textContent='SLOT 0'+(i+1);
+  const sel=document.createElement('select');sel.setAttribute('aria-label','自分の熟語 '+(i+1));
+  for(const word of WORDS){const opt=document.createElement('option');opt.value=word;opt.textContent=word;sel.appendChild(opt);}
+  sel.value=onlineDeck[i];const hint=document.createElement('div');hint.className='slot-effect';hint.textContent=DESCRIPTIONS[sel.value];
+  sel.addEventListener('change',()=>{onlineDeck[i]=sel.value;hint.textContent=DESCRIPTIONS[sel.value];try{localStorage.setItem('asobeat_kanji_online_deck',JSON.stringify(onlineDeck))}catch(e){}});
+  box.append(title,sel,hint);host.appendChild(box);
+ }
+}
+function showOnlineDeck(room){
+ window.KanjiPractice?.stop();
+ if(st.scene!=='onlineDeck'){cancelAsync();st.phase='onlineDeck';changeScene('onlineDeck');onlineDeckSelect();}
+ $('onlineMatchSuccess').textContent=room.round>1?'↻ 再戦のデッキ編成':'✓ マッチ成立！';
+ const mine=online.role==='host'?'🔵 青':'🔴 赤';
+ const teamCard=$('onlineDeckScene').querySelector('.team-form');
+ teamCard.classList.toggle('team-red',online.slot===1);teamCard.classList.toggle('team-blue',online.slot===0);
+ const opponent=online.role==='host'?room.guestName:room.hostName;
+ $('onlineOpponent').textContent=mine+' あなた　VS　'+(online.slot===0?'🔴':'🔵')+' '+(opponent||'相手');
+ const locked=!!room[online.role==='host'?'hostReady':'guestReady'];
+ $('onlineReadyBtn').disabled=locked||room.stage!=='deck';
+ for(const sel of $('onlineDeckOptions').querySelectorAll('select'))sel.disabled=locked||room.stage!=='deck';
+ $('onlineReadyStatus').className='online-status '+(locked?'waiting':'');
+ $('onlineReadyStatus').textContent=room.stage==='reveal'?'二人のデッキが決定しました。対戦開始を準備しています…':locked?'デッキを確定しました。相手の決定を待っています…':'相手には、あなたが編成している熟語は見えません。';
+}
+async function lockOnlineDeck(){const net=window.KanjiOnline;if(!net||!online.active)return;
+ $('onlineReadyBtn').disabled=true;
+ try{await net.commitDeck(onlineDeck);online.committed=true;
+  $('onlineReadyStatus').textContent='デッキを決定しました！ 相手の決定を待っています。';
+ }catch(e){$('onlineReadyBtn').disabled=false;$('onlineReadyStatus').textContent=networkError(e);}
+}
+function resetOnlineViewForRound(round){
+ online.round=round;online.seq=-1;online.seenMoveId=null;online.ownShotId=null;
+ online.starting=false;online.revealing=false;online.committed=false;online.publishing=false;online.resetting=false;online.rematch=false;online.gameReady=false;
+}
+function handleOnlineRoom(room,meta={}){
+ if(st.mode!=='online'||!online.active)return;
+ if(meta.error){const msg=meta.error;if(st.scene==='match')onlineUIError(msg);else showNetworkStatus(msg,'error');return;}
+ if(!room)return;
+ online.pendingRoom=room;
+ if(room.stage==='closed'){
+  window.KanjiPractice?.stop();
+  const msg='対戦相手が部屋を退出しました。タイトルから入り直してください。';
+  if(st.scene==='match')onlineUIError(msg);else if(st.scene==='onlineDeck'){$('onlineReadyBtn').disabled=true;$('onlineReadyStatus').textContent=msg;}
+  else if(st.scene==='result'){$('winnerName').textContent+=' ／ '+msg;}
+  else{st.phase='closed';showNetworkStatus(msg,'error');onModal('<p>'+msg+'</p>','対戦が終了しました',true);}
+  return;
+ }
+ if(room.round!==online.round){resetOnlineViewForRound(room.round);}
+ if(room.stage==='waiting'){
+  if(st.scene!=='match'){cancelAsync();changeScene('match');}
+  $('waitingPanel').classList.remove('hidden');$('waitingHeadline').textContent='友達の参加を待っています…';
+  window.KanjiPractice?.start();return;
+ }
+ if(room.stage==='deck'){
+  if(st.scene==='result'&&!online.rematch)return;
+  showOnlineDeck(room);return;
+ }
+ if(room.stage==='reveal'){
+  showOnlineDeck(room);
+  if(!room[online.role==='host'?'hostReveal':'guestReveal']&&!online.revealing){
+   online.revealing=true;window.KanjiOnline.revealDeck().catch(e=>{$('onlineReadyStatus').textContent=networkError(e)}).finally(()=>{online.revealing=false});
+  }
+  if(online.role==='host'&&room.hostReveal&&room.guestReveal&&!online.starting){
+   online.starting=true;
+   (async()=>{
+    if(!await window.KanjiOnline.verifyDecks(room))return;
+    const world=P.newWorld();P.spawnInitial(world,[room.hostReveal.deck,room.guestReveal.deck]);
+    const arr=new Uint8Array(1);crypto.getRandomValues(arr);
+    await window.KanjiOnline.startRound(P.packWorld(world),arr[0]%2,room.round);
+   })().catch(e=>{$('onlineReadyStatus').textContent=networkError(e)}).finally(()=>{online.starting=false});
+  }return;
+ }
+ if(room.stage==='playing'){
+  if(st.scene!=='game'&&st.phase!=='onlineRoulette'){
+   if(st.scene==='result'&&online.rematch)return;
+   online.starting=true;st.phase='onlineRoulette';
+   window.KanjiPractice?.stop();
+   const skipWheel=room.seq>0||(room.rouletteAt?.toMillis?.()&&Date.now()-room.rouletteAt.toMillis()>15000);
+   if(skipWheel){enterOnlineSnapshot(room);}
+   else roulette(room.first,()=>{online.starting=false;enterOnlineSnapshot(online.pendingRoom||room)});
+   return;
+  }
+  if(st.scene==='game'){
+   if(room.seq>online.seq){enterOnlineSnapshot(room);return;}
+   if(room.move&&room.move.seq===online.seq&&room.move.id!==online.seenMoveId){
+    if(room.move.by===online.uid){online.seenMoveId=room.move.id;}
+    else replayOnlineMove(room.move);
+   }
+   if(st.phase==='playing')showNetworkStatus(room.turn===online.slot?'あなたのターン！ 漢字を選んで発射':'相手のターンです。発射を待っています');
+  }return;
+ }
+ if(room.stage==='result'){
+  if(room.seq>online.seq||st.scene!=='result'&&st.scene!=='onlineDeck'){enterOnlineSnapshot(room);}
+  if(st.scene==='result'){
+   if(!online.rematch&&(room.rematchHost||room.rematchGuest)){
+    const other=online.role==='host'?room.rematchGuest:room.rematchHost;
+    if(other)$('winnerName').textContent='相手が再戦を希望しています！';
+   }
+  }
+  if(online.role==='host'&&room.rematchHost&&room.rematchGuest&&!online.resetting){
+   online.resetting=true;window.KanjiOnline.resetRematch(room.round)
+    .catch(e=>{if(st.scene==='onlineDeck')$('onlineReadyStatus').textContent=networkError(e)})
+    .finally(()=>{online.resetting=false});
+  }return;
+ }
+}
+function enterOnlineSnapshot(room){
+ if(!room?.game||!online.active)return;
+ const firstEntry=st.scene!=='game'&&st.scene!=='result';
+ if(firstEntry){cancelAsync();st.fx=[];st.texts=[];st.flash=0;st.shake=0;st.hitstop=0;st.acc=0;st.moving=0;st.still=0;st.vortexPlayed=false;}
+ try{st.world=P.unpackWorld(room.game)}catch(e){showNetworkStatus('盤面の読み込みに失敗しました。再読み込みしてください。','error');return;}
+ st.names=[room.hostName,room.guestName];
+ st.decks=[room.hostReveal.deck,room.guestReveal.deck];
+ st.turn=room.turn;st.shotCount=room.seq;st.stats=room.stats||freshStats();
+ online.seq=room.seq;online.seenMoveId=null;online.ownShotId=null;online.gameReady=true;
+ if(room.stage==='result'){
+  st.phase='playing';st.scene='game';finishGame(room.result?.winner??-1);
+  return;
+ }
+ st.phase='playing';changeScene('game');resizeCanvas();beginTurn();
+ if(room.move&&room.move.seq===room.seq&&room.move.by!==online.uid)replayOnlineMove(room.move);
+ if(st.world.suddenDeath&&room.seq>0){showEffect('⚠️ サドンデス！ 場外が毎ターン広がる',900);}
+}
+function replayOnlineMove(move){
+ if(st.scene!=='game'||st.phase!=='playing'||move.seq!==online.seq)return;
+ online.seenMoveId=move.id;
+ const b=st.world.bodies.find(x=>x.id===move.bodyId&&x.alive);
+ if(!b){showNetworkStatus('相手の手を同期できません。盤面更新を待っています。','error');st.phase='syncing';return;}
+ fireShot(b,move.dx,move.dy,move.power,move.spin,move.spinStrength,true);
+ showNetworkStatus('相手の発射を再生中…','pending');
+}
+function publishOnlineTurn(){
+ if(!online.active||!online.ownShotId||online.publishing)return;
+ const id=online.ownShotId,snapshot=P.packWorld(st.world),turn=st.turn,stats=JSON.parse(JSON.stringify(st.stats));
+ const result=st.phase==='result'?{winner:st.result.winner,turns:st.shotCount,stats}:null;
+ if(!result){st.phase='syncing';showNetworkStatus('対戦結果を相手へ同期中…','pending');}
+ online.publishing=true;
+ let attempts=0;
+ async function send(){
+  try{await window.KanjiOnline.finishShot(id,snapshot,turn,stats,result);online.publishing=false;}
+  catch(e){if(++attempts<=3&&online.active){showNetworkStatus('送信を再試行しています…','pending');setTimeout(send,1400*attempts)}
+   else{online.publishing=false;showNetworkStatus('ターン同期に失敗しました。通信を確認して画面を再読み込みしてください。','error')}}
+ }
+ send();
+}
+async function requestOnlineRematch(){
+ if(!online.active||st.mode!=='online')return;
+ online.rematch=true;showOnlineDeck(online.pendingRoom||{});
+ $('onlineReadyBtn').disabled=true;$('onlineReadyStatus').textContent='相手が「もう一度戦う」を選ぶまで待っています。デッキは先に編集できます。';
+ try{await window.KanjiOnline.offerRematch();}
+ catch(e){$('onlineReadyStatus').textContent=networkError(e);online.rematch=false;}
+}
+async function leaveOnlineRoom(){
+ const net=window.KanjiOnline;online.active=false;cancelAsync();window.KanjiPractice?.stop();
+ st.phase='title';st.drag=null;st.selected=null;online.gameReady=false;
+ if(net)await net.leave();
+ $('roomJoinBtn').classList.remove('hidden');$('roomJoinBtn').disabled=false;$('roomJoinBtn').textContent='合言葉でマッチング →';
+ closeModal();changeScene('home');st.mode='solo';
+}
 // Wiring
-$('soloBtn').addEventListener('click',()=>{initAudio();sound('tap');setup('solo')});
+$('onlineBtn').addEventListener('click',openOnlineMatch);
+$('roomJoinBtn').addEventListener('click',joinOnlineRoom);
+$('roomCode').addEventListener('input',e=>{if(e.target.value.length>10)e.target.value=Array.from(e.target.value).slice(0,10).join('')});
+$('matchBack').addEventListener('click',()=>{if(online.active)leaveOnlineRoom();else changeScene('home')});
+$('roomCancelBtn').addEventListener('click',leaveOnlineRoom);
+$('onlineDeckLeave').addEventListener('click',leaveOnlineRoom);
+$('onlineReadyBtn').addEventListener('click',lockOnlineDeck);
+$('onlineAbilityGuide').innerHTML=''; // Filled after abilityManualHTML is declared.
+$('soloBtn').addEventListener('click' ,()=>{initAudio();sound('tap');setup('solo')});
 $('localBtn').addEventListener('click',()=>{initAudio();sound('tap');setup('local')});
 $('setupBack').addEventListener('click',()=>{cancelAsync();changeScene('home')});
 $('confirmBack').addEventListener('click',()=>{st.phase='setup';changeScene('setup')});
 $('toConfirmBtn').addEventListener('click',()=>{initAudio();sound('tap');confirm()});
-$('startMatchBtn').addEventListener('click',roulette);
+$('startMatchBtn').addEventListener('click',()=>roulette());
 for(const b of $('difficultyOptions').querySelectorAll('button'))b.addEventListener('click',()=>{st.diff=b.dataset.diff;updateModeUI();save();sound('tap')});
 $('name0').addEventListener('change',readSetup);$('name1').addEventListener('change',readSetup);
 $('spinRight').addEventListener('click',()=>{st.spin=1;$('spinRight').classList.add('active');$('spinLeft').classList.remove('active');sound('tap')});
@@ -542,9 +781,9 @@ $('gameScene').addEventListener('lostpointercapture',e=>{if(st.drag&&e.pointerId
 $('quitBtn').addEventListener('click',()=>{
  onModal('<p><b>対戦を続けますか？</b></p><p>タイトルに戻ると、今の対戦は最初からになります。</p>','対戦メニュー',true);
 });
-$('modalEndMatch').addEventListener('click',()=>{cancelAsync();st.phase='title';st.selected=null;st.drag=null;changeScene('home')});
-$('rematchBtn').addEventListener('click',()=>{const bits=new Uint32Array(1);try{crypto.getRandomValues(bits)}catch(e){bits[0]=Math.floor(Math.random()*2)};startMatch(bits[0]%2)});
-$('resultHomeBtn').addEventListener('click',()=>{cancelAsync();st.phase='title';changeScene('home')});
+$('modalEndMatch').addEventListener('click',()=>{if(st.mode==='online')leaveOnlineRoom();else{cancelAsync();st.phase='title';st.selected=null;st.drag=null;changeScene('home')}});
+$('rematchBtn').addEventListener('click',()=>{if(st.mode==='online'){requestOnlineRematch();return;}const bits=new Uint32Array(1);try{crypto.getRandomValues(bits)}catch(e){bits[0]=Math.floor(Math.random()*2)};startMatch(bits[0]%2)});
+$('resultHomeBtn').addEventListener('click',()=>{if(st.mode==='online')leaveOnlineRoom();else{cancelAsync();st.phase='title';changeScene('home')}});
 function abilityManualHTML(){
  const explanation='<div class="ability-definition"><b>攻撃</b>：漢字同士がぶつかって飛ばすこと。暴走で追いかけてぶつかった場合も攻撃です。'+
   '<br><b>能力</b>：漢字の技で相手を動かすこと。「衝撃」や「渦巻」がこれにあたります。'+
@@ -552,7 +791,7 @@ function abilityManualHTML(){
   '<br><b>連続ヒット</b>：技で飛ばされたコマが別のコマにぶつかったら、それは攻撃です。</div>';
  const rows=P.ABILITY_RULES.map(a=>`<tr><th scope="row">${a.word}<small>${a.kind}</small></th><td><b>${a.numbers}</b><br><span>${a.timing}</span></td></tr>`).join('');
  return explanation+`<div class="ability-scroll"><table class="ability-table"><thead><tr><th>漢字</th><th>何が起こる？ どのくらい強い？</th></tr></thead><tbody>${rows}</tbody></table></div>`+
- '<p class="ability-extra"><b>角当て：</b>漢字の角を相手にぶつけると、普通は1.2倍。「一撃」なら普通に当てると3倍、角なら合計5倍！</p>'+
+ '<p class="ability-extra"><b>角当て：</b>漢字の角を相手にぶつけると、普通は1.2倍。「一撃」は最初の敵だけ3倍、角なら合計5倍！</p>'+
  '<p class="ability-extra"><b>操作：</b>漢字をタップして選ぶ → 好きな場所から引っ張る → 指を離して発射。遠い位置から引き始めるほどよく回ります。もう片方の指でタップするとキャンセル。</p>'+
  '<p class="ability-extra"><b>試合の流れ：</b>最初の2ターンは準備時間で場外が閉じ、技もお休み。両チーム残り1コマになったら、毎ターン出口が広がります。</p>';
 }
@@ -560,13 +799,13 @@ function openAbilityManual(){onModal(abilityManualHTML(),'熟語の能力と強�
 $('helpBtn').addEventListener('click',openAbilityManual);
 $('abilityHomeBtn').addEventListener('click',openAbilityManual);
 // The same comparison table is available while choosing each three-word deck.
-$('abilitySetup').innerHTML=abilityManualHTML();
+$('abilitySetup').innerHTML=abilityManualHTML();$('onlineAbilityGuide').innerHTML=abilityManualHTML();
 $('modalClose').addEventListener('click',closeModal);$('modalOK').addEventListener('click',closeModal);$('modal').addEventListener('click',e=>{if(e.target===$('modal'))closeModal()});
 $('soundBtn').addEventListener('click',()=>{st.sound=!st.sound;$('soundBtn').classList.toggle('muted',!st.sound);$('soundBtn').textContent=st.sound?'♪':'×';if(st.sound){initAudio();sound('tap')}save()});
 $('soundBtn').classList.toggle('muted',!st.sound);$('soundBtn').textContent=st.sound?'♪':'×';
 window.addEventListener('resize',()=>{if(st.scene==='game')resizeCanvas()});
 window.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();return}if(e.code==='Space'&&st.scene==='game'&&st.drag&&st.drag.body&&st.drag.power>.06){e.preventDefault();const d=st.drag;fireShot(d.body,d.dx,d.dy,d.power,st.spin,d.spinStrength??1)}});
 // Extra hook for deterministic and automated smoke tests; only exposed when ?test=1.
-if(new URLSearchParams(location.search).has('test'))window.__KANJI_TEST__={st,P,setup,confirm,startMatch,fireShot,finishGame,finishShot,beginTurn,selectPiece,aimSpinAt,draw:()=>paint(.016),cpuTakeTurn,resizeCanvas,tickPhysics,collisionHooks};
+if(new URLSearchParams(location.search).has('test'))window.__KANJI_TEST__={st,P,online,setup,confirm,startMatch,fireShot,finishGame,finishShot,beginTurn,selectPiece,aimSpinAt,draw:()=>paint(.016),cpuTakeTurn,resizeCanvas,tickPhysics,collisionHooks,handleOnlineRoom,enterOnlineSnapshot,showOnlineDeck,requestOnlineRematch,joinOnlineRoom,openOnlineMatch};
 makeBoardArt();requestAnimationFrame(mainLoop);
 })();
