@@ -1,7 +1,7 @@
-/* 漢字おはじき Ver.1.4 | ASOBEAT — preparation and sudden death */
+/* 漢字おはじき Ver.1.5 | ASOBEAT — preparation and sudden death */
 (function(){'use strict';
 const P=window.KanjiPhysics;if(!P){document.body.textContent='物理エンジンを読み込めませんでした。';return;}
-const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'停止後1秒・敵を自動追尾','衝撃':'0.5秒で2コマ跳躍→半径1コマの能力衝撃波','鉄壁':'物理攻撃だけ軽減（能力は通常どおり）','渦巻':'敵に命中後1秒の渦','巨大':'命中で1.2倍巨大化（最大3回）','一撃':'発射中の対敵衝突×2'};
+const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'停止後1秒・敵を自動追尾','衝撃':'0.5秒で2コマ跳躍→半径1コマの能力衝撃波','鉄壁':'物理攻撃だけ軽減（能力は通常どおり）','渦巻':'敵に命中後1秒の渦','巨大':'命中で1.2倍巨大化（最大3回）','一撃':'当てると3倍！角なら5倍！'};
 const $=id=>document.getElementById(id),ctx=$('board').getContext('2d',{alpha:false});
 const {W,H}=P,PI=Math.PI,TAU=PI*2,clamp=P.clamp;
 const scenes=['home','setup','confirm','game','result'];
@@ -40,7 +40,14 @@ function confirm(){readSetup();for(let i=0;i<2;i++){
  $('confirmName'+i).textContent=st.names[i];const host=$('confirmDeck'+i);host.textContent='';
  for(const word of st.decks[i]){const chip=document.createElement('span');chip.className='confirm-word';chip.textContent=word;host.appendChild(chip)}
  }st.phase='confirm';changeScene('confirm')}
-function onModal(content,title='遊びかた'){$('modalTitle').textContent=title;if(content!==undefined)$('modalContent').innerHTML=content;$('modal').classList.remove('hidden')}
+function onModal(content,title='遊びかた',quit=false){
+ $('modalTitle').textContent=title;
+ $('modalEyebrow').textContent=quit?'GAME MENU':'HOW TO PLAY';
+ if(content!==undefined)$('modalContent').innerHTML=content;
+ $('modalOK').textContent=st.scene==='game'?'対戦へ戻る':'閉じる';
+ $('modalEndMatch').classList.toggle('hidden',!quit);
+ $('modal').classList.remove('hidden');
+}
 function closeModal(){$('modal').classList.add('hidden')}
 function toast(str){const el=$('toast');el.textContent=str;el.classList.remove('hidden');later(()=>el.classList.add('hidden'),1650)}
 function initAudio(){if(!st.sound)return;try{if(!audio){audio=new (window.AudioContext||window.webkitAudioContext)();noiseBuffer=audio.createBuffer(1,Math.floor(audio.sampleRate*.25),audio.sampleRate);const a=noiseBuffer.getChannelData(0);for(let i=0;i<a.length;i++)a[i]=(Math.random()*2-1)*(.85-i/a.length*.35)}if(audio.state==='suspended')audio.resume()}catch(e){st.sound=false}}
@@ -110,7 +117,7 @@ function fireShot(b,dirX,dirY,power,spin,spinStrength=1){if(st.phase!=='playing'
  if(b.ability==='iron'&&!st.world.preparation)showEffect('鉄壁：自ターン終了時に護陣！',900);
  if(b.ability==='vortex'&&!st.world.preparation)showEffect('渦巻：敵に命中後、停止時に渦！',850);
  if(b.ability==='giant'&&!st.world.preparation)showEffect('巨大：敵への命中で巨大化！',800);
- if(b.ability==='strike'&&!st.world.preparation)showEffect('一撃：敵への吹き飛ばし×2！',800);
+ if(b.ability==='strike'&&!st.world.preparation)showEffect('一撃：普通は3倍・角なら5倍！',800);
  return true;
 }
 function collisionHooks(){return {
@@ -127,12 +134,12 @@ function collisionHooks(){return {
      addRing(shooter.x,shooter.y,'#eac864',shooter.radius*1.7);addParticles(shooter.x,shooter.y,23,'#ffd774',1.3);
      st.flash=.20;showText('巨大化 ×'+shooter.growthStacks,shooter.x,shooter.y,'#fff2b4');showEffect('巨大化 '+shooter.growthStacks+'/3 !!',850);sound('merge');
     }
-    if(shooter.ability==='strike'){
-     addParticles(p.x,p.y,22,'#ffc064',1.25);showText('一撃 ×2!!',p.x,p.y,'#ffe5a8');st.shake=Math.max(st.shake,7);sound('crit');
+    if(shooter.ability==='strike'&&!corner){
+     addParticles(p.x,p.y,22,'#ffc064',1.25);showText('一撃 ×3!!',p.x,p.y,'#ffe5a8');st.shake=Math.max(st.shake,7);sound('crit');
     }
   }
   if(corner){
-   if(shooter&&a.owner!==b.owner&&!a.static&&!b.static){st.stats.crits[shooter.owner]++;st.hitstop=Math.max(st.hitstop,.05);st.flash=.26;showText('CRITICAL ×1.2!',p.x,p.y,'#fff1a2');sound('crit');}
+   if(shooter&&a.owner!==b.owner&&!a.static&&!b.static){st.stats.crits[shooter.owner]++;st.hitstop=Math.max(st.hitstop,.05);st.flash=.26;showText(shooter.ability==='strike'?'CRITICAL ×5!!':'CRITICAL ×1.2!',p.x,p.y,'#fff1a2');sound('crit');}
   }else if(big){sound('impact',speed/300);if(speed>420)st.hitstop=Math.max(st.hitstop,.022)}
  },
  merge:(a,b)=>{
@@ -151,7 +158,7 @@ function collisionHooks(){return {
   st.shake=5.5;st.hitstop=Math.max(st.hitstop,.05);st.flash=.32;
   addRing(wave.x,wave.y,'#a7ffff',P.PIECE_UNIT);
   addParticles(wave.x,wave.y,20,'#82f4ff',.95);
-  showText('衝撃着地！',wave.x,wave.y,'#dcffff');showEffect('衝撃：2コマジャンプ→通常100%攻撃相当の衝撃波！',930);sound('shock');
+  showText('衝撃着地！',wave.x,wave.y,'#dcffff');showEffect('衝撃！ 円の中の全員を外へ吹き飛ばす！',930);sound('shock');
  },
  shockHit:(wave,target,impulse)=>{
   addParticles(target.x,target.y,Math.max(5,Math.round(impulse/100)),'#8ddbf3',.65);
@@ -532,21 +539,24 @@ $('gameScene').addEventListener('pointermove',pointerMove);
 $('gameScene').addEventListener('pointerup',pointerUp);
 $('gameScene').addEventListener('pointercancel',pointerCancel);
 $('gameScene').addEventListener('lostpointercapture',e=>{if(st.drag&&e.pointerId===st.drag.pointer)pointerCancel(e)});
-$('quitBtn').addEventListener('click',()=>{onModal(`<p><b>対戦を終了しますか？</b></p><p>この対戦の進行状況は保存されません。</p><button type="button" class="ghost-btn" id="endMatch">対戦を終了してタイトルへ戻る</button>`,'対戦を終了');$('endMatch').addEventListener('click',()=>{cancelAsync();st.phase='title';changeScene('home')})});
+$('quitBtn').addEventListener('click',()=>{
+ onModal('<p><b>対戦を続けますか？</b></p><p>タイトルに戻ると、今の対戦は最初からになります。</p>','対戦メニュー',true);
+});
+$('modalEndMatch').addEventListener('click',()=>{cancelAsync();st.phase='title';st.selected=null;st.drag=null;changeScene('home')});
 $('rematchBtn').addEventListener('click',()=>{const bits=new Uint32Array(1);try{crypto.getRandomValues(bits)}catch(e){bits[0]=Math.floor(Math.random()*2)};startMatch(bits[0]%2)});
 $('resultHomeBtn').addEventListener('click',()=>{cancelAsync();st.phase='title';changeScene('home')});
 function abilityManualHTML(){
- const explanation='<div class="ability-definition"><b>攻撃</b>：コマ同士の物理的な接触で飛ばすこと。暴走の追尾中にぶつかる場合も攻撃です。'+
-  '<br><b>能力</b>：漢字の効果で直接動かすこと。衝撃波・渦巻は能力に分類されます。'+
-  '<br><b>鉄壁</b>は攻撃だけを軽減し、能力には<b>倍率×1.0</b>で通常どおり影響されます。'+
-  '<br><b>連鎖</b>：能力で動いたコマが別のコマにぶつかった場合、その二次衝突は攻撃です。</div>';
+ const explanation='<div class="ability-definition"><b>攻撃</b>：漢字同士がぶつかって飛ばすこと。暴走で追いかけてぶつかった場合も攻撃です。'+
+  '<br><b>能力</b>：漢字の技で相手を動かすこと。「衝撃」や「渦巻」がこれにあたります。'+
+  '<br><b>鉄壁</b>：ぶつかる攻撃には強いけれど、衝撃や渦巻には普通のコマと同じように動かされます。'+
+  '<br><b>連続ヒット</b>：技で飛ばされたコマが別のコマにぶつかったら、それは攻撃です。</div>';
  const rows=P.ABILITY_RULES.map(a=>`<tr><th scope="row">${a.word}<small>${a.kind}</small></th><td><b>${a.numbers}</b><br><span>${a.timing}</span></td></tr>`).join('');
- return explanation+`<div class="ability-scroll"><table class="ability-table"><thead><tr><th>熟語／分類</th><th>効果・倍率と発動条件</th></tr></thead><tbody>${rows}</tbody></table></div>`+
- `<p class="ability-extra"><b>共通：</b>通常コマの最大発射速度は ${P.FULL_SHOT_SPEED}。角当てクリティカルは物理攻撃×1.2。衝撃の「100%」は単独・等質量の正面衝突を基準とするため、実際の移動量は質量・角度・他コマとの接触で変わります。</p>`+
- '<p class="ability-extra"><b>操作：</b>漢字をタップして選択 → 好きな場所から逆方向へドラッグ → 指を離して発射。引き始めが漢字から遠いほど回転が強くなります。ドラッグ中は別の指でタップしてキャンセルできます。</p>'+
- '<p class="ability-extra"><b>準備・終盤：</b>初めの合計2ターンは場外・中央封鎖で熟語能力OFF（合体は可能）。最後の未合体1文字は覚醒。双方残り1コマではサドンデスが始まり、1ターンごとに4方向の場外幅が1コマ広がります。</p>';
+ return explanation+`<div class="ability-scroll"><table class="ability-table"><thead><tr><th>漢字</th><th>何が起こる？ どのくらい強い？</th></tr></thead><tbody>${rows}</tbody></table></div>`+
+ '<p class="ability-extra"><b>角当て：</b>漢字の角を相手にぶつけると、普通は1.2倍。「一撃」なら普通に当てると3倍、角なら合計5倍！</p>'+
+ '<p class="ability-extra"><b>操作：</b>漢字をタップして選ぶ → 好きな場所から引っ張る → 指を離して発射。遠い位置から引き始めるほどよく回ります。もう片方の指でタップするとキャンセル。</p>'+
+ '<p class="ability-extra"><b>試合の流れ：</b>最初の2ターンは準備時間で場外が閉じ、技もお休み。両チーム残り1コマになったら、毎ターン出口が広がります。</p>';
 }
-function openAbilityManual(){onModal(abilityManualHTML(),'熟語能力・倍率一覧')}
+function openAbilityManual(){onModal(abilityManualHTML(),'熟語の能力と強さ')}
 $('helpBtn').addEventListener('click',openAbilityManual);
 $('abilityHomeBtn').addEventListener('click',openAbilityManual);
 // The same comparison table is available while choosing each three-word deck.

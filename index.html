@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
   <meta name="theme-color" content="#151f30">
   <meta name="description" content="漢字を弾いて、熟語に合体！角当てクリティカルで相手を場外へ。ASOBEATの無料対戦おはじきゲーム。">
-  <title>漢字おはじき Ver.1.4 | ASOBEAT</title>
+  <title>漢字おはじき Ver.1.5 | ASOBEAT</title>
   <link rel="stylesheet" href="style.css">
   <script defer src="physics.js"></script>
   <script defer src="game.js"></script>
@@ -32,7 +32,7 @@
     <div class="home-actions">
       <button class="action action-main" id="soloBtn" type="button"><span class="btn-symbol">⚔</span><span><strong>ひとりで遊ぶ</strong><small>CPUと対戦 / 3段階の難易度</small></span><span class="btn-chevron">›</span></button>
       <button class="action action-alt" id="localBtn" type="button"><span class="btn-symbol">◈</span><span><strong>みんなで遊ぶ</strong><small>1台で交代しながら2人対戦</small></span><span class="btn-chevron">›</span></button>
-      <button class="ability-home-btn" id="abilityHomeBtn" type="button">✦ 熟語6種の能力・倍率を見る <span>›</span></button>
+      <button class="ability-home-btn" id="abilityHomeBtn" type="button">✦ 熟語の能力と強さを見る <span>›</span></button>
       <div class="home-foot"><span>◆ 1試合 3〜5分が目安</span><span>◆ 無料・登録不要</span></div>
     </div>
   </main>
@@ -54,7 +54,7 @@
       <label class="small-label" for="name1">名前（10文字以内）</label><input id="name1" class="name-input" maxlength="10" value="紅チーム" autocomplete="off" />
       <div class="deck-options" id="deck1"></div>
     </div>
-    <details class="ability-guide-card"><summary>熟語6種の能力・倍率一覧 <span>タップで開閉</span></summary><div id="abilitySetup"></div></details>
+    <details class="ability-guide-card"><summary>熟語の能力と強さ <span>タップで開閉</span></summary><div id="abilitySetup"></div></details>
     <button class="solid-btn" id="toConfirmBtn" type="button">対戦内容を確認 <span>→</span></button>
   </main>
 
@@ -90,7 +90,7 @@
     <div class="game-bottom">
       <div class="rotate-container"><span class="control-heading">回転方向 <span id="spinMeter" class="spin-meter">回転力 --</span></span><div class="segmented rotate-switch" role="group" aria-label="回転方向"><button id="spinRight" class="active" type="button">↻ 右回転</button><button id="spinLeft" type="button">↺ 左回転</button></div></div>
       <div class="current-status"><b id="selectedLabel">自分の漢字をタップ</b><small id="hintLabel">漢字をタップ → 好きな位置からドラッグ／2本指で中止</small></div>
-      <button class="quit-btn" id="quitBtn" type="button" aria-label="対戦を終了">×</button>
+      <button class="quit-btn" id="quitBtn" type="button" aria-label="対戦メニューを開く">終了</button>
     </div>
   </main>
 
@@ -112,16 +112,17 @@
   </main>
 
   <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
-    <div class="modal-panel"><button id="modalClose" class="modal-close" aria-label="閉じる" type="button">×</button><span class="eyebrow">HOW TO PLAY</span><h2 id="modalTitle">遊びかた</h2>
+    <div class="modal-panel"><button id="modalClose" class="modal-close" aria-label="閉じる" type="button">×</button><span id="modalEyebrow" class="eyebrow">HOW TO PLAY</span><h2 id="modalTitle">遊びかた</h2>
       <div id="modalContent" class="modal-content">
         <p>① 自分の漢字をタップして選択。<br>② 盤面内外の好きな位置から逆方向へドラッグ。<br>③ 指を離すと発射！選択した漢字から遠い位置でドラッグ開始すると回転力UP。<br>④ 引っ張っている間にもう片方の指でタップするとキャンセル。</p>
         <p><b>熟語合体</b>：暴＋走＝暴走など、対応する2文字を衝突させると合体。6種類の熟語と能力を選べます。</p>
         <p><b>攻撃</b>＝コマ同士の物理衝突（暴走の追尾中も攻撃）。<b>能力</b>＝衝撃波や渦巻による直接移動（鉄壁で軽減されない）。</p>
-        <p><b>能力詳細</b>：タイトル画面かデッキ選択画面の「熟語能力・倍率一覧」から確認できます。</p>
+        <p><b>能力</b>：6つの熟語の効果は「熟語の能力を見る」から確認できます。</p>
         <p><b>準備フェーズ</b>：最初の2ターンは中央の壁と四辺の封鎖壁で自陣を守り、能力発動はありません（合体可能）。</p><p><b>覚醒・サドンデス</b>：残り1コマが未合体なら覚醒。両者1コマずつになれば、以後1ターンごとに場外口が1コマ広がります。</p>
         <p><b>コツ</b>：↻↺で回転を選択。漢字の角を相手に当てると1.2倍のクリティカル！四辺中央の赤い開口部から相手を落とせば勝利。</p>
       </div>
-      <button id="modalOK" class="solid-btn" type="button">わかった！</button>
+      <button id="modalOK" class="solid-btn" type="button">対戦へ戻る <span aria-hidden="true">↩</span></button>
+      <button id="modalEndMatch" class="ghost-btn modal-end-match hidden" type="button">対戦を終了してタイトルへ戻る</button>
     </div>
   </div>
   <div id="roulette" class="roulette hidden" aria-live="polite"><div class="roulette-glow"></div><div class="roulette-core"><span class="eyebrow">FIRST MOVE / 四分割ルーレット</span><b id="rouletteText">先攻は…</b><div class="wheel-holder"><div class="wheel-pointer"></div><div id="rouletteWheel" class="roulette-wheel"><span class="wheel-label pos-n">青</span><span class="wheel-label pos-e">赤</span><span class="wheel-label pos-s">青</span><span class="wheel-label pos-w">赤</span><span class="wheel-center">先攻</span></div></div><small class="wheel-note">青2区画・赤2区画 / 各区画25%</small></div></div>
