@@ -100,8 +100,18 @@
 @keyframes onlinePulse{50%{opacity:.45;transform:scale(.78)}}
 .practice-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;border-top:1px solid #e5e2dc;padding-top:12px;margin-bottom:8px}
 .practice-head b{font-size:14px;color:#2d485c}.practice-head small{font-size:10px;color:#7a858d}
-.practice-options{display:flex;gap:8px;margin-bottom:8px}.practice-options select,.practice-options button{background:#eff3f4;border:1px solid #d2dbe0;color:#2a536d;border-radius:9px;font-weight:850;font-size:13px;padding:8px 12px}.practice-options select{flex:1}
-#practiceBoard{display:block;width:100%;aspect-ratio:540/470;height:auto;background:#e6d8c1;border:7px solid #776855;border-radius:12px;touch-action:none;user-select:none;-webkit-user-select:none;}
+.practice-options{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin:9px 0 10px;min-width:0}
+.practice-select{display:flex;flex-direction:column;gap:5px;min-width:0;border:1px solid #d5dfe5;background:#f2f8fc;padding:8px;border-radius:11px}
+.practice-select.red{background:#fff2f0;border-color:#edcfc9}
+.practice-select span{font-size:11px;font-weight:950;color:#296f9c}.practice-select.red span{color:#b64b49}
+.practice-select select{width:100%;min-width:0;background:white;border:1px solid #c8d4da;color:#1d4d6c;border-radius:8px;font-weight:950;font-size:16px;padding:9px 6px;text-align:center}
+.practice-select.red select{color:#ae4548;border-color:#e6c6c4}
+.practice-tools{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:0 0 9px}
+.practice-turn{font-size:11px;color:#fff;background:#2874a8;padding:6px 10px;border-radius:50px;font-weight:900}
+.practice-turn.cpu{background:#c4514b}
+.practice-blocked{font-size:10px;color:#7c6555;font-weight:850}
+.practice-tools button{margin-left:auto;background:#fff;border:1px solid #d2dbe0;color:#2a536d;border-radius:8px;font-weight:900;font-size:11px;padding:7px 9px}
+#practiceBoard{display:block;width:100%;aspect-ratio:540/760;height:auto;background:#e6d8c1;border:5px solid #776855;border-radius:12px;touch-action:none;user-select:none;-webkit-user-select:none;box-shadow:0 8px 19px #4d3e2d28;}
 .practice-tip{font-size:11px;font-weight:700;color:#607587;line-height:1.6;margin:9px 0 0}
 .online-versus-line{border:1px solid #b1cddd;border-radius:13px;background:#eaf4fb;padding:13px 15px;font-weight:900;color:#265678;margin-bottom:13px}
 .online-status{padding:12px 14px;border-radius:12px;background:#e8f0ed;color:#326757;font-size:13px;line-height:1.6;font-weight:800}

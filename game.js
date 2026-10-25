@@ -1,7 +1,7 @@
-/* 漢字おはじき Ver.1.7 | ASOBEAT — preparation and sudden death */
+/* 漢字おはじき Ver.1.8 | ASOBEAT — preparation and sudden death */
 (function(){'use strict';
 const P=window.KanjiPhysics;if(!P){document.body.textContent='物理エンジンを読み込めませんでした。';return;}
-const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'停止後1秒・敵を自動追尾','衝撃':'引く強さで0.5〜3コマジャンプ・着地後に衝撃波','鉄壁':'ぶつかる攻撃を軽減（能力は普通に受ける）','渦巻':'敵に当てて止まると半径1.5コマの真円に渦','巨大':'命中で1.2倍巨大化（最大3回）','一撃':'最初の敵だけ3倍！角なら5倍！','分裂':'敵に触れると2個に！もう一度分裂して最大4個'};
+const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'停止後1秒・敵を自動追尾','衝撃':'引く強さで0.5〜3コマジャンプ・着地後に衝撃波','鉄壁':'ぶつかる攻撃を軽減（能力は普通に受ける）','渦巻':'停止後、半径約3.8コマ内の敵を2.3秒で2周','巨大':'命中で1.2倍巨大化（最大3回）','一撃':'最初の敵だけ3倍！角なら5倍！','分裂':'相手のターンに接触で分裂・1ターン1回'};
 const $=id=>document.getElementById(id),ctx=$('board').getContext('2d',{alpha:false});
 const {W,H}=P,PI=Math.PI,TAU=PI*2,clamp=P.clamp;
 const scenes=['home','match','onlineDeck','setup','confirm','game','result'];
@@ -135,10 +135,10 @@ function fireShot(b,dirX,dirY,power,spin,spinStrength=1,fromNetwork=false){
  addParticles(b.x,b.y,10,st.turn===0?'#70c5f7':'#f4a29c',1);st.shake=2.6;sound('shoot');$('aimHint').classList.add('hidden');$('spinMeter').textContent='回転力 --';
  if(b.ability==='shock'&&!st.world.preparation)showEffect('衝撃：0.5秒ジャンプ → 着地で円形波！',850);
  if(b.ability==='iron'&&!st.world.preparation)showEffect('鉄壁：自ターン終了時に護陣！',900);
- if(b.ability==='vortex'&&!st.world.preparation)showEffect('渦巻：敵に命中後、停止時に渦！',850);
+ if(b.ability==='vortex'&&!st.world.preparation)showEffect('渦巻：停止後、近くの敵を2周巻き込む！',850);
  if(b.ability==='giant'&&!st.world.preparation)showEffect('巨大：敵への命中で巨大化！',800);
  if(b.ability==='strike'&&!st.world.preparation)showEffect('一撃：最初の敵だけ3倍・角なら5倍！',850);
- if(b.ability==='split'&&!st.world.preparation)showEffect('分裂：敵に触れると2つに増える！',850);
+ if(b.ability==='split'&&!st.world.preparation)showEffect('分裂：相手のターンに接触すると発動！',850);
  return true;
 }
 function collisionHooks(){return {
@@ -211,13 +211,13 @@ function tickPhysics(dt){if(st.hitstop>0){st.hitstop=Math.max(0,st.hitstop-dt);r
  if(st.moving>.58&&P.allStopped(st.world))st.still+=dt;else st.still=0;
  if(st.still>.48||st.moving>12.5){
    const shooter=st.world.bodies.find(b=>b.id===st.world.shooterId&&b.alive);
-   if(!st.vortexPlayed&&!st.world.preparation&&shooter?.ability==='vortex'&&shooter.vortexHitEnemy){
+   if(!st.vortexPlayed&&!st.world.preparation&&shooter?.ability==='vortex'){
     st.vortexPlayed=true;
     const v=P.startVortex(st.world,shooter);
     if(v){
      st.still=0;st.moving=0;st.acc=0;
      addRing(shooter.x,shooter.y,'#a875ed',v.range);addParticles(shooter.x,shooter.y,26,'#9c78ef',1.1);
-     showEffect('渦巻・周囲の全員を1秒旋回！',950);sound('shock');return;
+     showEffect('渦巻・近くの敵だけを2.3秒で2周！',1200);sound('shock');return;
     }
    }
    P.settle(st.world);st.acc=0;
@@ -402,8 +402,8 @@ function makeBoardArt(){const canvas=document.createElement('canvas');canvas.wid
  c.fillStyle='rgba(39,56,65,.12)';c.font='900 20px sans-serif';c.textAlign='center';c.fillText('紅 の 陣',W/2,45);c.fillText('青 の 陣',W/2,H-25);
  artCanvas=canvas;
 }
-function drawArenaGeometry(){
- const world=st.world;if(!world)return;
+function drawArenaGeometry(world=st.world,context=ctx){
+ const ctx=context;if(!world)return;
  const prep=world.preparation,gx=prep?0:world.gateX,gy=prep?0:world.gateY;
  ctx.save();
  function segment(x,y,w,h){if(w<=0||h<=0)return;
@@ -412,18 +412,28 @@ function drawArenaGeometry(){
   ctx.fillStyle=grad;ctx.fillRect(x,y,w,h);
   ctx.fillStyle='#fff2ca4d';ctx.fillRect(x+3,y+3,Math.max(0,w-6),Math.max(0,h-6));
  }
+ // Match the physical SAT triangles. They exist in every arena mode.
+ const s=P.CORNER_SIZE;
+ function corner(x,y,flipX,flipY){
+  ctx.save();ctx.translate(x,y);ctx.scale(flipX,flipY);
+  const g=ctx.createLinearGradient(0,0,s,s);g.addColorStop(0,'#4b3e36');g.addColorStop(1,'#8a7157');
+  ctx.fillStyle=g;ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(s,0);ctx.lineTo(0,s);ctx.closePath();ctx.fill();
+  ctx.strokeStyle='#d6b98c';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(s,0);ctx.lineTo(0,s);ctx.stroke();
+  ctx.strokeStyle='#eed6a35c';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(s-11,2);ctx.lineTo(2,s-11);ctx.stroke();ctx.restore();
+ }
  const lenX=(W-gx)/2,lenY=(H-gy)/2;
  segment(0,0,lenX,15);segment(W-lenX,0,lenX,15);
  segment(0,H-15,lenX,15);segment(W-lenX,H-15,lenX,15);
  segment(0,0,15,lenY);segment(0,H-lenY,15,lenY);
  segment(W-15,0,15,lenY);segment(W-15,H-lenY,15,lenY);
+ corner(0,0,1,1);corner(W,0,-1,1);corner(0,H,1,-1);corner(W,H,-1,-1);
  if(prep){
   ctx.fillStyle='#102a37b0';ctx.fillRect(0,H/2-10,W,20);
   ctx.strokeStyle='#e8cc81';ctx.lineWidth=3;ctx.setLineDash([10,7]);
   ctx.beginPath();ctx.moveTo(20,H/2);ctx.lineTo(W-20,H/2);ctx.stroke();ctx.setLineDash([]);
   ctx.fillStyle='#fff7da';ctx.textAlign='center';ctx.font='900 19px sans-serif';
   ctx.fillText('準 備 フ ェ ー ズ',W/2,H/2-16);
- }else{
+ }else if(!world.practiceSealed){
   function gate(x,y,rot,width){ctx.save();ctx.translate(x,y);ctx.rotate(rot);
    ctx.fillStyle=world.suddenDeath?'#d63e5070':'#d5686265';ctx.fillRect(-width/2,-6,width,11);
    ctx.textAlign='center';ctx.fillStyle=world.suddenDeath?'#b32e42':'#ab4b3e';
@@ -440,7 +450,7 @@ function resizeCanvas(){const canvas=$('board'),dpr=Math.min(2,window.devicePixe
  const cap=Math.min(window.innerHeight-200,820);const h=Math.max(235,Math.min(availableWidth*H/W,cap));const w=h*W/H;
  b.style.width=`${w}px`;b.style.height=`${h}px`;b.style.flex='0 0 auto';
 }
-function drawPiece(b){const color=b.owner===0?'#2473ab':'#c7504f',dark=b.owner===0?'#174766':'#782d30';
+function drawPiece(b,context=ctx,selected=st.selected){const ctx=context;const color=b.owner===0?'#2473ab':'#c7504f',dark=b.owner===0?'#174766':'#782d30';
  const shine=b.owner===0?'#9fddfa':'#ffd2b9';
  ctx.save();ctx.translate(b.x,b.y);
  if(b.jump){const lift=Math.sin(Math.PI*b.jump.age/b.jump.duration)*33;
@@ -448,7 +458,7 @@ function drawPiece(b){const color=b.owner===0?'#2473ab':'#c7504f',dark=b.owner==
   ctx.translate(0,-lift);ctx.scale(1+lift*.004,1+lift*.004);
  }
  ctx.rotate(b.angle);const scale=b.scale||1;ctx.scale(scale,scale);
- if(st.selected===b&&st.phase==='playing'){
+ if(selected===b){
  ctx.save();ctx.strokeStyle=b.owner===0?'#2ba5e3':'#d96255';ctx.lineWidth=2;ctx.setLineDash([5,5]);ctx.globalAlpha=.85;
  ctx.beginPath();ctx.ellipse(0,0,b.w*.70+11,b.h*.70+11,0,0,TAU);ctx.stroke();ctx.restore();
  }
@@ -469,11 +479,11 @@ function drawPiece(b){const color=b.owner===0?'#2473ab':'#c7504f',dark=b.owner==
  ctx.restore();
  if(b.ability==='split'&&b.splitTier){
   ctx.fillStyle=b.owner===0?'#176e9e':'#ab3948';ctx.font='900 13px sans-serif';ctx.textAlign='center';
-  ctx.fillText(b.splitTier===1?'2/3':'1/3',0,b.h*.6+12);
+  ctx.fillText(b.splitTier===1?'2/3':'1/3',b.x,b.y+b.h*.6+12);
  }
 }
-function drawFields(){
- for(const f of st.world.fields){const p=P.fieldPosition(st.world,f),r=f.radius;
+function drawFields(world=st.world,context=ctx){const ctx=context;
+ for(const f of world.fields){const p=P.fieldPosition(world,f),r=f.radius;
   ctx.save();ctx.beginPath();ctx.arc(p.x,p.y,r,0,TAU);
   const grad=ctx.createRadialGradient(p.x,p.y,9,p.x,p.y,r);
   if(f.owner===0){grad.addColorStop(0,'rgba(64,167,237,.02)');grad.addColorStop(.8,'rgba(47,150,239,.13)');grad.addColorStop(1,'rgba(30,122,222,.24)');}
@@ -483,8 +493,8 @@ function drawFields(){
   ctx.beginPath();ctx.arc(p.x,p.y,r-9,0,TAU);ctx.lineWidth=1;ctx.stroke();ctx.restore();
  }
 }
-function drawVortices(){
- for(const v of st.world.vortices){
+function drawVortices(world=st.world,context=ctx){const ctx=context;
+ for(const v of world.vortices){
   const alpha=1-v.age/v.duration;ctx.save();ctx.translate(v.center.x,v.center.y);
   // Exactly circular ability hit zone, matching the physics selection radius.
   ctx.beginPath();ctx.arc(0,0,v.range,0,TAU);ctx.fillStyle=`rgba(138,85,217,${.05*alpha})`;ctx.fill();
@@ -787,7 +797,6 @@ $('resultHomeBtn').addEventListener('click',()=>{if(st.mode==='online')leaveOnli
 function abilityManualHTML(){
  const explanation='<div class="ability-definition"><b>攻撃</b>：漢字同士がぶつかって飛ばすこと。暴走で追いかけてぶつかった場合も攻撃です。'+
   '<br><b>能力</b>：漢字の技で相手を動かすこと。「衝撃」や「渦巻」がこれにあたります。'+
-  '<br><b>鉄壁</b>：ぶつかる攻撃には強いけれど、衝撃や渦巻には普通のコマと同じように動かされます。'+
   '<br><b>連続ヒット</b>：技で飛ばされたコマが別のコマにぶつかったら、それは攻撃です。</div>';
  const rows=P.ABILITY_RULES.map(a=>`<tr><th scope="row">${a.word}<small>${a.kind}</small></th><td><b>${a.numbers}</b><br><span>${a.timing}</span></td></tr>`).join('');
  return explanation+`<div class="ability-scroll"><table class="ability-table"><thead><tr><th>漢字</th><th>何が起こる？ どのくらい強い？</th></tr></thead><tbody>${rows}</tbody></table></div>`+
@@ -807,5 +816,33 @@ window.addEventListener('resize',()=>{if(st.scene==='game')resizeCanvas()});
 window.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();return}if(e.code==='Space'&&st.scene==='game'&&st.drag&&st.drag.body&&st.drag.power>.06){e.preventDefault();const d=st.drag;fireShot(d.body,d.dx,d.dy,d.power,st.spin,d.spinStrength??1)}});
 // Extra hook for deterministic and automated smoke tests; only exposed when ?test=1.
 if(new URLSearchParams(location.search).has('test'))window.__KANJI_TEST__={st,P,online,setup,confirm,startMatch,fireShot,finishGame,finishShot,beginTurn,selectPiece,aimSpinAt,draw:()=>paint(.016),cpuTakeTurn,resizeCanvas,tickPhysics,collisionHooks,handleOnlineRoom,enterOnlineSnapshot,showOnlineDeck,requestOnlineRematch,joinOnlineRoom,openOnlineMatch};
-makeBoardArt();requestAnimationFrame(mainLoop);
+makeBoardArt();
+// Shared visual engine. Training reuses the same board, wall and kanji-piece renderers.
+window.KanjiRenderer={drawPractice(canvas,world,selected,drag){
+ if(!world||!artCanvas)return;
+ const c=canvas.getContext('2d',{alpha:false});
+ c.setTransform(canvas.width/W,0,0,canvas.height/H,0,0);
+ c.clearRect(0,0,W,H);c.drawImage(artCanvas,0,0,W,H);
+ drawArenaGeometry(world,c);drawFields(world,c);drawVortices(world,c);
+ for(const b of world.bodies)if(b.alive)drawPiece(b,c,selected);
+ for(const wave of world.shocks){
+  const fade=Math.max(0,1-wave.age/.59);c.save();c.globalAlpha=fade;
+  c.strokeStyle='#82e9ff';c.lineWidth=8;c.beginPath();c.arc(wave.x,wave.y,wave.radius,0,TAU);c.stroke();c.restore();
+ }
+ if(drag&&selected&&selected.alive){
+  const len=Math.hypot(drag.dx,drag.dy);
+  if(len>3){const dx=drag.dx/len,dy=drag.dy/len,x=selected.x,y=selected.y;
+   const end=Math.min(165,32+len*.9);c.save();c.strokeStyle='#2389c6';c.lineWidth=7;c.lineCap='round';
+   c.shadowColor='#ffffffa0';c.shadowBlur=9;c.beginPath();c.moveTo(x+dx*38,y+dy*38);c.lineTo(x+dx*end,y+dy*end);c.stroke();
+   c.shadowBlur=0;c.fillStyle='#2389c6';c.beginPath();const tx=x+dx*(end+19),ty=y+dy*(end+19);
+   c.moveTo(tx,ty);c.lineTo(tx-dx*25-dy*13,ty-dy*25+dx*13);c.lineTo(tx-dx*25+dy*13,ty-dy*25-dx*13);c.fill();
+   if(selected.ability==='shock'){
+    const p=P.shockLanding(selected,dx,dy,drag.power);
+    c.strokeStyle='#28b5cb';c.setLineDash([6,7]);c.lineWidth=3;c.beginPath();c.arc(p.x,p.y,P.PIECE_UNIT,0,TAU);c.stroke();c.setLineDash([]);
+   }
+   c.restore();
+  }
+ }
+}};
+requestAnimationFrame(mainLoop);
 })();

@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
   <meta name="theme-color" content="#151f30">
   <meta name="description" content="漢字を弾いて、熟語に合体！角当てクリティカルで相手を場外へ。ASOBEATの無料対戦おはじきゲーム。">
-  <title>漢字おはじき Ver.1.7 | ASOBEAT</title>
-  <link rel="stylesheet" href="style.css">
-  <script defer src="physics.js"></script>
-  <script defer src="game.js"></script>
-  <script defer src="practice.js"></script>
-  <script type="module" src="online.js"></script>
+  <title>漢字おはじき Ver.1.8 | ASOBEAT</title>
+  <link rel="stylesheet" href="style.css?v=18">
+  <script defer src="physics.js?v=18"></script>
+  <script defer src="game.js?v=18"></script>
+  <script defer src="practice.js?v=18"></script>
+  <script type="module" src="online.js?v=18"></script>
 </head>
 <body>
 <div id="app">
@@ -54,10 +54,14 @@
     </div>
     <div id="waitingPanel" class="waiting-card hidden">
       <div class="waiting-status"><span class="online-pulse"></span><div><b id="waitingHeadline">相手を待っています…</b><small id="waitingSub">友達に合言葉を伝えてください</small></div></div>
-      <div class="practice-head"><b>待っている間に試し打ち！</b><small>練習は本番の対戦に影響しません</small></div>
-      <div class="practice-options"><select id="practiceWord" aria-label="試し打ちする熟語"><option>暴走</option><option>衝撃</option><option>鉄壁</option><option>渦巻</option><option>巨大</option><option>一撃</option><option>分裂</option></select><button id="practiceReset" type="button">↻ やり直す</button></div>
-      <canvas id="practiceBoard" width="540" height="470" aria-label="漢字コマを試し打ちできる練習盤面"></canvas>
-      <p id="practiceTip" class="practice-tip">青い熟語をタップ → 好きな位置から引っ張る → 離して発射</p>
+      <div class="practice-head"><b>本番ステージで試し打ち！</b><small>この練習は対戦に影響しません</small></div>
+      <div class="practice-options" aria-label="練習する熟語の選択">
+        <label class="practice-select blue"><span>🔵 あなた</span><select id="practiceWord" aria-label="自分の完成済み熟語"><option>暴走</option><option>衝撃</option><option>鉄壁</option><option>渦巻</option><option>巨大</option><option>一撃</option><option>分裂</option></select></label>
+        <label class="practice-select red"><span>🔴 CPU</span><select id="practiceOpponentWord" aria-label="CPUの完成済み熟語"><option>暴走</option><option>衝撃</option><option>鉄壁</option><option>渦巻</option><option>巨大</option><option>一撃</option><option>分裂</option></select></label>
+      </div>
+      <div class="practice-tools"><span id="practiceTurn" class="practice-turn">先攻：あなた</span><span class="practice-blocked">四辺の場外は封鎖中</span><button id="practiceReset" type="button">↻ 最初から</button></div>
+      <canvas id="practiceBoard" width="540" height="760" aria-label="本番と同じ漢字コマと盤面を使用する試し打ち。場外はすべて封鎖されています"></canvas>
+      <p id="practiceTip" class="practice-tip">青い漢字は完成済み。画面を逆方向にドラッグして、そのまま発射できます。</p>
       <button id="roomCancelBtn" class="ghost-btn" type="button">マッチングをやめる</button>
     </div>
   </main>
@@ -107,7 +111,7 @@
       <div class="vs-divider"><span>VS</span></div>
       <div class="versus-team"><span class="team-tag red">赤</span><div><strong id="confirmName1">紅チーム</strong><div class="confirm-deck" id="confirmDeck1"></div></div></div>
     </div>
-    <div class="rule-summary"><b>勝利条件</b><span>相手の漢字をすべて場外へ！</span><small>四辺の真ん中だけが出口。壁は反射します。</small></div>
+    <div class="rule-summary"><b>勝利条件</b><span>相手の漢字をすべて場外へ！</span><small>四辺中央が場外口。四隅は小さな斜めの壁で守られています。</small></div>
     <button class="solid-btn" id="startMatchBtn" type="button">先攻ルーレットを回す <span>→</span></button>
   </main>
 
