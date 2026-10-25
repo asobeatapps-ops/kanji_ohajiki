@@ -1,4 +1,4 @@
-/* 漢字おはじき Ver.2.2 | ASOBEAT — live-authoritative online sync */
+/* 漢字おはじき Ver.2.3 | ASOBEAT — live-authoritative online sync */
 (function(){'use strict';
 const P=window.KanjiPhysics;if(!P){document.body.textContent='物理エンジンを読み込めませんでした。';return;}
 const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'停止後1秒・敵を自動追尾','暴風':'引く強さで0.5〜3コマジャンプ・着地後に衝撃波','鉄壁':'ぶつかる攻撃を軽減（能力は普通に受ける）','渦巻':'停止後、半径約3.8コマ内の敵を2.3秒で2周','巨大':'命中で1.2倍巨大化（最大3回）','一撃':'最初の敵だけ3倍！角なら5倍！','分裂':'相手のターンに接触で分裂・1ターン1回','跳弾':'自ターンの壁衝突で加速（操作していなくても発動）','磁力':'停止後、渦巻と同じ範囲の敵だけを2秒間引き寄せ','反射':'相手ターンの衝突で0.7倍の力を反射'};
@@ -127,35 +127,48 @@ function startStreak(){
  st.world.bodies=[P.body({x:W/2,y:H-178,word:streakSelected,text:streakSelected,owner:0,merged:true})];
  st.turn=0;st.shotCount=0;st.spin=1;st.acc=0;st.moving=0;st.still=0;st.selected=null;st.drag=null;
  st.fx=[];st.texts=[];st.flash=0;st.shake=0;st.hitstop=0;st.vortexPlayed=false;st.magnetPlayed=false;
- st.stats=freshStats();st._impactTimes=new Map();st.result=null;st._streakPlayerOut=false;
+ st.stats=freshStats();st._impactTimes=new Map();st.result=null;st._streakPlayerOut=false;st._streakFirstOut=null;
  spawnStreakCpu();
  $('streakShareBtn').classList.add('hidden');$('spinRight').classList.add('active');$('spinLeft').classList.remove('active');
  $('effectBanner').classList.add('hidden');$('suddenOverlay').classList.add('hidden');$('streakCounter').classList.remove('hidden');
+ $('gameScene').classList.add('corner-ko');
  changeScene('game');resizeCanvas();beginTurn();
 }
 function spawnStreakCpu(){
  const world=st.world;
  world.bodies=world.bodies.filter(b=>b.alive&&b.owner===0);
+ // If BOTH fell in the preceding shot but the CPU crossed the line first,
+ // the round counts as a win. Reissue the player's original kanji for the next bout.
+ if(!world.bodies.length){world.bodies.push(P.body({x:W/2,y:H-178,word:st.streakWord,text:st.streakWord,owner:0,merged:true}));}
  const word=cpuStreakWord();st.streakNextWord=word;st.decks[1]=[word];
  const existing=world.bodies.find(b=>b.alive&&b.owner===0);
- const spots=[{x:W/2,y:168},{x:160,y:168},{x:380,y:168},{x:W/2,y:110}];
+ const spots=[{x:W/2,y:168},{x:160,y:168},{x:380,y:168},{x:W/2,y:124}];
  const spot=spots.find(p=>!existing||Math.hypot(p.x-existing.x,p.y-existing.y)>Math.max(160,existing.radius+90))||spots[0];
  world.bodies.push(P.body({x:spot.x,y:spot.y,word,text:word,owner:1,merged:true}));
- world.fields=[];world.shocks=[];world.vortices=[];world.magnets=[];world.shooterId=null;
+ P.settle(world);world.fields=[];world.shocks=[];world.vortices=[];world.magnets=[];world.shooterId=null;
+ // Clear every round-local flag: without this, the next shot can be treated
+ // as a continuation of the defeated round and become unselectable.
+ st._streakPlayerOut=false;st._streakFirstOut=null;st.selected=null;st.drag=null;st.cancelUntil=0;
 }
 function streakDefeated(){
  $('streakCounter').classList.add('hidden');finishGame(1);
 }
 function streakWin(){
+ if(st.phase==='streakAdvance'||st.phase==='result')return;
  st.streakWins++;st.phase='streakAdvance';st.selected=null;st.drag=null;
+ cancelHold();suppressAimUp=null;
  $('streakCounter').textContent=st.streakWins+'連勝中';
  $('streakCounter').classList.add('streak-announce');$('streakCounter').classList.remove('hidden');
  st.world.fields=[];P.settle(st.world);updateHud();sound('win');
  later(()=>{
   if(st.mode!=='streak'||st.phase!=='streakAdvance')return;
   $('streakCounter').classList.remove('streak-announce');spawnStreakCpu();st.turn=0;
-  st.vortexPlayed=false;st.magnetPlayed=false;st.acc=0;st.moving=0;st.still=0;
+  st.vortexPlayed=false;st.magnetPlayed=false;st.acc=0;st.moving=0;st.still=0;st.hitstop=0;
   beginTurn();
+  // One more safety check for the original lost-control bug.
+  if(st.mode==='streak'&&st.phase==='playing'&&!st.world.bodies.some(b=>b.alive&&b.owner===0)){
+   st.world.bodies.push(P.body({x:W/2,y:H-178,word:st.streakWord,text:st.streakWord,owner:0,merged:true}));updateHud();
+  }
  },2000);
 }
 function updateModeUI(){
@@ -221,6 +234,7 @@ function startMatch(first=null){cancelAsync();st.world=P.newWorld();P.spawnIniti
  $('suddenOverlay').classList.add('hidden');$('suddenOverlay').setAttribute('aria-hidden','true');
  $('effectBanner').classList.add('hidden');$('toast').classList.add('hidden');
  $('fieldStatus').className='field-status hidden';st.bannerUntil=0;
+ $('gameScene').classList.remove('corner-ko');
  changeScene('game');resizeCanvas();updateHud();beginTurn();
 }
 function updateHud(){if(!st.world)return;
@@ -239,6 +253,13 @@ function beginTurn(){if(st.phase==='result'||!st.world)return;st.phase='playing'
  const cpu=(st.mode==='solo'||st.mode==='streak')&&st.turn===1;
  const remote=st.mode==='online'&&st.turn!==online.slot;
  if(remote){$('phaseText').textContent='相手の操作を待っています';$('selectedLabel').textContent='相手のターン';$('hintLabel').textContent='相手が発射するまで待ちましょう';}
+ if(st.mode==='streak'&&st.turn===0){
+  // Only one kanji starts each round. Select it automatically so that the
+  // next round is playable immediately, even without another tap.
+  st.selected=st.world.bodies.find(b=>b.alive&&b.owner===0)||null;
+  $('selectedLabel').textContent='';
+  $('hintLabel').textContent=st.selected?'ドラッグして発射 ／ 長押しで能力を見る':'コマを復帰しています…';
+ }
  for(const id of ['spinRight','spinLeft'])$(id).disabled=cpu||remote;
  updateHud();
  // Preparation is announced once for exactly 1 s, then only a half-second
@@ -263,7 +284,9 @@ function fireShot(b,dirX,dirY,power,spin,spinStrength=1,fromNetwork=false){
  }
  if(st.phase!=='playing'||!b||!b.alive||b.owner!==st.turn)return false;
  const len=Math.hypot(dirX,dirY);if(len<.01||power<.06)return false;
- P.fire(st.world,b,dirX,dirY,power,spin,spinStrength);st.vortexPlayed=false;st.magnetPlayed=false;st.shotCount++;st.phase='moving';st.moving=0;st.still=0;st.acc=0;st.selected=null;st.drag=null;
+ P.fire(st.world,b,dirX,dirY,power,spin,spinStrength);
+ if(st.mode==='streak'){st._streakPlayerOut=false;st._streakFirstOut=null;}
+ st.vortexPlayed=false;st.magnetPlayed=false;st.shotCount++;st.phase='moving';st.moving=0;st.still=0;st.acc=0;st.selected=null;st.drag=null;
  $('phaseText').textContent='物理演算中…';$('selectedLabel').textContent=b.text+'、発射！';$('hintLabel').textContent='全コマが止まると交代';
  addParticles(b.x,b.y,10,st.turn===0?'#70c5f7':'#f4a29c',1);st.shake=2.6;sound('shoot');$('aimHint').classList.add('hidden');$('spinMeter').textContent='回転力 --';
  if(b.ability==='shock'&&!st.world.preparation)showEffect('暴風：0.5秒ジャンプ → 着地で円形波！',850);
@@ -316,7 +339,10 @@ function collisionHooks(){return {
   showText('『'+m.word+'』合体!!',m.x,m.y,'#fff2b9');showEffect(m.word+' 合体成功！',1050);sound('merge');
  },
  out:b=>{
-  if(st.mode==='streak'&&b.owner===0)st._streakPlayerOut=true;
+  if(st.mode==='streak'){
+   if(st._streakFirstOut===null)st._streakFirstOut=b.owner;
+   if(b.owner===0)st._streakPlayerOut=true;
+  }
   st.stats.outs[1-b.owner]++;const pos={x:clamp(b.x,25,W-25),y:clamp(b.y,25,H-25)};
   addParticles(pos.x,pos.y,20,b.owner===0?'#3989c5':'#d35b58',1.3);st.shake=4.8;showText('場外!!',pos.x,pos.y,'#ffe9bb');sound('out');updateHud();
  },
@@ -347,7 +373,12 @@ function tickPhysics(dt){if(st.hitstop>0){st.hitstop=Math.max(0,st.hitstop-dt);r
   P.step(st.world,1/120,collisionHooks());st.acc-=1/120;steps++;
  }
  if(steps===8)st.acc=0;
- if(st.mode==='streak'&&st._streakPlayerOut){P.settle(st.world);streakDefeated();return;}
+ if(st.mode==='streak'&&st._streakFirstOut!==null){
+  // The winner is the side whose piece crossed a KO corner SECOND.
+  // If the CPU fell first and the player followed, the streak still grows.
+  if(st._streakFirstOut===1)streakWin();else streakDefeated();
+  return;
+ }
  if(st.moving>.58&&P.allStopped(st.world))st.still+=dt;else st.still=0;
  if(st.still>.48||st.moving>12.5){
    const shooter=st.world.bodies.find(b=>b.id===st.world.shooterId&&b.alive);
@@ -377,13 +408,16 @@ function tickPhysics(dt){if(st.hitstop>0){st.hitstop=Math.max(0,st.hitstop-dt);r
 function finishShot(){
  if(!st.world||st.phase!=='moving')return;
  const world=st.world,n0=P.remaining(world,0),n1=P.remaining(world,1);
- if(st.mode==='streak'&&(n0===0||n1===0)){if(n0===0)streakDefeated();else streakWin();return;}
- if(n0===0||n1===0){finishGame(n0===0&&n1===0?-1:n0===0?1:0);if(st.mode==='online')publishOnlineTurn();return;}
  if(st.mode==='streak'){
-  if(n0===0){streakDefeated();return;}
-  if(n1===0){streakWin();return;}
+  if(n0===0||n1===0){
+   // Same-shot double KO obeys the observed KO order, never team priority.
+   if(st._streakFirstOut===1||(n1===0&&n0>0))streakWin();else streakDefeated();
+   return;
+  }
   P.finishTurn(world,st.turn,true);st.turn=1-st.turn;beginTurn();return;
  }
+ // Non-streak: simultaneous elimination in the SAME turn is ALWAYS a DRAW.
+ if(n0===0||n1===0){finishGame(n0===0&&n1===0?-1:n0===0?1:0);if(st.mode==='online')publishOnlineTurn();return;}
  const wasPreparation=world.preparation;
  if(wasPreparation){
   world.prepTurns++;
@@ -588,7 +622,26 @@ function drawArenaGeometry(world=st.world,context=ctx){
   ctx.fillStyle=grad;ctx.fillRect(x,y,w,h);
   ctx.fillStyle='#fff2ca4d';ctx.fillRect(x+3,y+3,Math.max(0,w-6),Math.max(0,h-6));
  }
- // Match the physical SAT triangles. They exist in every arena mode.
+ if(world.cornerKnockout){
+  // Streak only: visibly filled side exits and four open triangular KO holes.
+  const s=P.STREAK_CORNER_SIZE;
+  segment(s,0,W-2*s,15);segment(s,H-15,W-2*s,15);
+  segment(0,s,15,H-2*s);segment(W-15,s,15,H-2*s);
+  for(const [x,y,sx,sy] of [[0,0,1,1],[W,0,-1,1],[0,H,1,-1],[W,H,-1,-1]]){
+   ctx.save();ctx.translate(x,y);ctx.scale(sx,sy);
+   const grad=ctx.createLinearGradient(0,0,s,s);grad.addColorStop(0,'#171a25');grad.addColorStop(1,'#7c2530');
+   ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(s,0);ctx.lineTo(0,s);ctx.closePath();
+   ctx.fillStyle=grad;ctx.fill();
+   ctx.beginPath();ctx.moveTo(s,0);ctx.lineTo(0,s);ctx.strokeStyle='#ff9f6d';ctx.lineWidth=4;ctx.shadowColor='#fb6850';ctx.shadowBlur=9;ctx.stroke();ctx.shadowBlur=0;
+   ctx.restore();
+   // Keep the label upright on all four corners (never mirrored by the canvas flip).
+   ctx.save();ctx.font='900 17px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+   ctx.fillStyle='#fff1d7';ctx.shadowColor='#0009';ctx.shadowBlur=3;
+   ctx.fillText('場外',x+sx*s*.32,y+sy*s*.34);ctx.restore();
+  }
+  ctx.restore();return;
+ }
+ // Match the physical SAT triangles. They exist in ordinary arena modes.
  const s=P.CORNER_SIZE;
  function corner(x,y,flipX,flipY){
   ctx.save();ctx.translate(x,y);ctx.scale(flipX,flipY);
@@ -1076,7 +1129,7 @@ $('soundBtn').classList.toggle('muted',!st.sound);$('soundBtn').textContent=st.s
 window.addEventListener('resize',()=>{if(st.scene==='game')resizeCanvas()});
 window.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();return}if(e.code==='Space'&&st.scene==='game'&&st.drag&&st.drag.body&&st.drag.power>.06){e.preventDefault();const d=st.drag;fireShot(d.body,d.dx,d.dy,d.power,st.spin,d.spinStrength??1)}});
 // Extra hook for deterministic and automated smoke tests; only exposed when ?test=1.
-if(new URLSearchParams(location.search).has('test'))window.__KANJI_TEST__={st,P,online,setup,confirm,startMatch,fireShot,finishGame,finishShot,beginTurn,selectPiece,aimSpinAt,draw:()=>paint(.016),cpuTakeTurn,resizeCanvas,tickPhysics,collisionHooks,handleOnlineRoom,enterOnlineSnapshot,showOnlineDeck,requestOnlineRematch,joinOnlineRoom,openOnlineMatch,startStreak,showStreakSetup,streakWin,streakDefeated,WORD_GROUPS};
+if(new URLSearchParams(location.search).has('test'))window.__KANJI_TEST__={st,P,online,setup,confirm,startMatch,fireShot,finishGame,finishShot,beginTurn,selectPiece,selectable,findSelected,aimSpinAt,draw:()=>paint(.016),cpuTakeTurn,resizeCanvas,tickPhysics,collisionHooks,handleOnlineRoom,enterOnlineSnapshot,showOnlineDeck,requestOnlineRematch,joinOnlineRoom,openOnlineMatch,startStreak,showStreakSetup,streakWin,streakDefeated,spawnStreakCpu,WORD_GROUPS};
 makeBoardArt();
 // Shared visual engine. Training reuses the same board, wall and kanji-piece renderers.
 window.KanjiRenderer={drawPractice(canvas,world,selected,drag){

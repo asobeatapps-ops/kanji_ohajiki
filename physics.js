@@ -1,4 +1,4 @@
-/* 漢字おはじき Ver.2.2: dependency-free 2D compound-SAT impulse solver.
+/* 漢字おはじき Ver.2.3: dependency-free 2D compound-SAT impulse solver.
    World units: board coordinates 540 x 760. Time: seconds. Clockwise rotation is positive.
    Runs physics at a fixed 1/120 second timestep in game.js, render separately.
 */
@@ -80,6 +80,8 @@ function body({x,y,text,owner,word,merged=false,angle=0,vx=0,vy=0,omega=0}){
 function staticRect(x,y,w,h){return {id:'wall',owner:-1,x,y,angle:0,vx:0,vy:0,omega:0,invM:0,invI:0,mass:Infinity,parts:[{x:0,y:0,w,h}],radius:hypot(w,h)/2,alive:true,static:true};}
 // Four small, solid corner wedges. The sloping 45-degree face is a REAL collision surface.
 const CORNER_SIZE=64;
+// Streak mode alone has four small triangular KO corners, with sealed mid-side gates.
+const STREAK_CORNER_SIZE=106;
 function staticTriangle(coords){
  const minX=Math.min(...coords.map(p=>p.x)),maxX=Math.max(...coords.map(p=>p.x));
  const minY=Math.min(...coords.map(p=>p.y)),maxY=Math.max(...coords.map(p=>p.y));
@@ -95,6 +97,17 @@ function cornerWalls(){const s=CORNER_SIZE;return [
  staticTriangle([{x:0,y:H},{x:s,y:H},{x:0,y:H-s}]),
  staticTriangle([{x:W,y:H},{x:W-s,y:H},{x:W,y:H-s}])
 ];}
+function streakWalls(){
+ const s=STREAK_CORNER_SIZE;
+ // The four diagonal corner cut-outs are open KO zones, NOT solid wedges.
+ // Every straight edge between the corner zones is a real solid wall.
+ return [staticRect(W/2,-10,W-2*s,28),staticRect(W/2,H+10,W-2*s,28),
+  staticRect(-10,H/2,28,H-2*s),staticRect(W+10,H/2,28,H-2*s)];
+}
+function streakCornerMargin(b){
+ return Math.min(b.x+b.y,(W-b.x)+b.y,b.x+(H-b.y),(W-b.x)+(H-b.y))-STREAK_CORNER_SIZE;
+}
+function inStreakCornerOut(b){return streakCornerMargin(b)<=0;}
 function walls(gx=184,gy=165,preparation=false){
  if(preparation)return [...cornerWalls(),
   staticRect(W/2,-10,W+28,28),staticRect(W/2,H+10,W+28,28),
@@ -112,11 +125,10 @@ function walls(gx=184,gy=165,preparation=false){
 }
 function openArena(world){world.preparation=false;world.walls=walls(world.gateX,world.gateY,false);world.fields.length=0}
 function setStreakArena(world){
- // Use EXACTLY sudden-death expansion stage 2, without sudden-death UI or progression.
+ // Win-streak mode ONLY: seal all original four mid-side KO gaps, open all four corners.
  world.preparation=false;world.prepTurns=2;world.practiceSealed=false;
- world.suddenDeath=true;world.gateX=184;world.gateY=165;world.suddenTurns=0;
- expandGates(world);expandGates(world);
- world.suddenDeath=false;world.fields.length=0;
+ world.cornerKnockout=true;world.suddenDeath=false;world.gateX=0;world.gateY=0;world.suddenTurns=0;
+ world.walls=streakWalls();world.fields.length=0;
 }
 function sealPracticeArena(world){
  // Ability effects remain ON while all four exits are completely sealed.
@@ -287,8 +299,28 @@ function resolve(world,a,b,m,step,onImpact,attacker,splitRequests){
 }
 // Prevent fast split fragments from passing through a CLOSED side wall.
 // A fragment is allowed to leave normally through a genuine central gate.
+function guardStreakEdges(world,b,previous=null){
+ if(!b.alive)return;
+ const c=Math.abs(Math.cos(b.angle)),si=Math.abs(Math.sin(b.angle));
+ const hx=Math.max(4,(b.w*c+b.h*si)*.5),hy=Math.max(4,(b.w*si+b.h*c)*.5);
+ const s=STREAK_CORNER_SIZE;
+ // If the piece travelled through a closed side, it must bounce, even if
+ // a very fast frame would otherwise place its center in the corner KO region.
+ const throughLeft=previous&&previous.x>=0&&previous.y>=s&&previous.y<=H-s&&b.x<hx;
+ const throughRight=previous&&previous.x<=W&&previous.y>=s&&previous.y<=H-s&&b.x>W-hx;
+ const throughTop=previous&&previous.y>=0&&previous.x>=s&&previous.x<=W-s&&b.y<hy;
+ const throughBottom=previous&&previous.y<=H&&previous.x>=s&&previous.x<=W-s&&b.y>H-hy;
+ // Corner triangles are open. Do not bounce a piece that enters along
+ // a diagonal; it must receive a genuine KO instead.
+ if(inStreakCornerOut(b)&&!throughLeft&&!throughRight&&!throughTop&&!throughBottom)return;
+ if((b.y>=s&&b.y<=H-s||throughLeft)&&b.x<hx+1){b.x=hx+1;b.vx=Math.abs(b.vx)*.62;}
+ if((b.y>=s&&b.y<=H-s||throughRight)&&b.x>W-hx-1){b.x=W-hx-1;b.vx=-Math.abs(b.vx)*.62;}
+ if((b.x>=s&&b.x<=W-s||throughTop)&&b.y<hy+1){b.y=hy+1;b.vy=Math.abs(b.vy)*.62;}
+ if((b.x>=s&&b.x<=W-s||throughBottom)&&b.y>H-hy-1){b.y=H-hy-1;b.vy=-Math.abs(b.vy)*.62;}
+}
 function guardFragmentEdges(world,b){
  if(!b.alive||!b.splitTier)return;
+ if(world.cornerKnockout){guardStreakEdges(world,b);return;}
  const c=Math.abs(Math.cos(b.angle)),si=Math.abs(Math.sin(b.angle));
  const hx=Math.max(3,(b.w*c+b.h*si)*.5),hy=Math.max(3,(b.w*si+b.h*c)*.5);
  const openY=!world.preparation&&!world.practiceSealed&&Math.abs(b.y-H*.5)<world.gateY*.5-hy;
@@ -314,7 +346,9 @@ function resolveFragmentSpawn(world,b){
  }
 }
 function stepOnce(world,dt,hooks={}){
- const bodies=world.bodies,staticWalls=world.walls;world.time+=dt;
+ const bodies=world.bodies,staticWalls=world.walls;
+ const before=world.cornerKnockout?new Map(bodies.filter(b=>b.alive).map(b=>[b.id,{x:b.x,y:b.y}])):null;
+ world.time+=dt;
  for(const b of bodies){if(!b.alive||b.merging)continue;
   // Shock flies over the board for 0.5 s, without a collision during the jump.
   if(b.jump){
@@ -442,9 +476,10 @@ function stepOnce(world,dt,hooks={}){
    }
   }
  }
- // A closed-wall collision can be skipped at very high speeds even with SAT.
- // Clamp only small split fragments: actual central openings still award KOs.
- for(const b of bodies)if(b.alive&&b.splitTier>0&&!b.jump)guardFragmentEdges(world,b);
+ // Closed-wall anti-tunnelling: all pieces in the streak arena, small fragments
+ // only in the ordinary arena. The diagonal corner KO holes remain open.
+ if(world.cornerKnockout){for(const b of bodies)if(b.alive&&!b.jump)guardStreakEdges(world,b,before?.get(b.id));}
+ else for(const b of bodies)if(b.alive&&b.splitTier>0&&!b.jump)guardFragmentEdges(world,b);
  for(const [a,b] of merges){if(a.alive&&b.alive)hooks.merge?.(a,b)}
  // Execute spawns AFTER SAT passes so a new child is not hit during the same contact.
  for(const req of splitRequests){
@@ -462,11 +497,25 @@ function stepOnce(world,dt,hooks={}){
   if(b.y<py){b.y=py;b.vy=Math.abs(b.vy)*.55}
   if(b.y>H-py){b.y=H-py;b.vy=-Math.abs(b.vy)*.55}
  }
- // A piece exits only after its center has crossed outside one of four wall gaps.
- for(const b of bodies){if(!b.alive||b.merging)continue;
-   const out=(b.x < -b.w*.4 || b.x>W+b.w*.4 || b.y< -b.h*.4 || b.y>H+b.h*.4);
-   if(out&&!world.preparation){b.alive=false;hooks.out?.(b)}
+ // Streak KO: crossing a diagonal CORNER exit. Other modes still KO only
+ // beyond their existing side openings. In a single physics microstep two
+ // pieces may cross at different fractions of dt: report real crossing order,
+ // NOT the insertion order of bodies, for first-out win streak scoring.
+ const outPieces=[];
+ for(const b of bodies){if(!b.alive||b.merging||world.preparation)continue;
+  const out=world.cornerKnockout?inStreakCornerOut(b)
+    :(b.x < -b.w*.4 || b.x>W+b.w*.4 || b.y< -b.h*.4 || b.y>H+b.h*.4);
+  if(out)outPieces.push(b);
  }
+ if(world.cornerKnockout&&outPieces.length>1){
+  const fraction=b=>{
+   const prev=before?.get(b.id);if(!prev)return -1;
+   const start=streakCornerMargin(prev),end=streakCornerMargin(b);
+   return start<=0?-1:start/Math.max(EPS,start-end);
+  };
+  outPieces.sort((a,b)=>fraction(a)-fraction(b)||a.id-b.id);
+ }
+ for(const b of outPieces){b.alive=false;hooks.out?.(b)}
  // The LAST unmerged character automatically awakens into its intended two-kanji word.
  // Apply once after all KOs for this simulation step; do not create a piece for a defeated team.
  if(!world.preparation&&remaining(world,0)>0 && remaining(world,1)>0){
@@ -493,7 +542,7 @@ function step(world,dt,hooks={}){
  return world;
 }
 function newWorld(){return {w:W,h:H,time:0,bodies:[],preparation:true,prepTurns:0,practiceSealed:false,shotSerial:0,splitUsedShot:-1,
- gateX:184,gateY:165,suddenDeath:false,suddenTurns:0,walls:walls(184,165,true),
+ gateX:184,gateY:165,suddenDeath:false,suddenTurns:0,cornerKnockout:false,walls:walls(184,165,true),
  shocks:[],vortices:[],magnets:[],fields:[],awakenedOwners:new Set(),shooterId:null,lastShooterOwner:0,shotTime:0};}
 function nearestEnemy(world,b){let nearest=null,best=Infinity;for(const p of world.bodies){if(!p.alive||p.owner===b.owner||p.id===b.id)continue;const d=hypot(p.x-b.x,p.y-b.y);if(d<best){best=d;nearest=p}}return nearest}
 function finishTurn(world,owner,allowAbility=true){
@@ -717,14 +766,22 @@ function evaluateShot(world, shooter,dir,power,spin){
    if(!world.preparation&&shooter.ability==='burst'&&b.src&&t>1&&t<2){const enemy=bs.filter(e=>e.alive&&e.owner!==b.owner).sort((p,q)=>hypot(p.x-b.x,p.y-b.y)-hypot(q.x-b.x,q.y-b.y))[0];if(enemy){const d=hypot(enemy.x-b.x,enemy.y-b.y)||1;b.vx+=(enemy.x-b.x)/d*400*dt;b.vy+=(enemy.y-b.y)/d*400*dt;}}
    if(b.src){const s=spin*.025;b.vx+=-b.vy*s*dt;b.vy+=b.vx*s*dt;}
    b.vx*=Math.exp(-2*dt);b.vy*=Math.exp(-2*dt);b.x+=b.vx*dt;b.y+=b.vy*dt;
-   if(b.x-b.r<0&&(world.preparation||!(Math.abs(b.y-H/2)<world.gateY/2))&&b.vx<0){b.x=b.r;b.vx=Math.abs(b.vx)*.65}
-   if(b.x+b.r>W&&(world.preparation||!(Math.abs(b.y-H/2)<world.gateY/2))&&b.vx>0){b.x=W-b.r;b.vx=-Math.abs(b.vx)*.65}
-   if(b.y-b.r<0&&(world.preparation||!(Math.abs(b.x-W/2)<world.gateX/2))&&b.vy<0){b.y=b.r;b.vy=Math.abs(b.vy)*.65}
-   if(b.y+b.r>H&&(world.preparation||!(Math.abs(b.x-W/2)<world.gateX/2))&&b.vy>0){b.y=H-b.r;b.vy=-Math.abs(b.vy)*.65}
+   if(world.cornerKnockout){
+    const s=STREAK_CORNER_SIZE;
+    if(b.x<b.r&&b.y>=s&&b.y<=H-s&&b.vx<0){b.x=b.r;b.vx=Math.abs(b.vx)*.65}
+    if(b.x>W-b.r&&b.y>=s&&b.y<=H-s&&b.vx>0){b.x=W-b.r;b.vx=-Math.abs(b.vx)*.65}
+    if(b.y<b.r&&b.x>=s&&b.x<=W-s&&b.vy<0){b.y=b.r;b.vy=Math.abs(b.vy)*.65}
+    if(b.y>H-b.r&&b.x>=s&&b.x<=W-s&&b.vy>0){b.y=H-b.r;b.vy=-Math.abs(b.vy)*.65}
+   }else{
+    if(b.x-b.r<0&&(world.preparation||!(Math.abs(b.y-H/2)<world.gateY/2))&&b.vx<0){b.x=b.r;b.vx=Math.abs(b.vx)*.65}
+    if(b.x+b.r>W&&(world.preparation||!(Math.abs(b.y-H/2)<world.gateY/2))&&b.vx>0){b.x=W-b.r;b.vx=-Math.abs(b.vx)*.65}
+    if(b.y-b.r<0&&(world.preparation||!(Math.abs(b.x-W/2)<world.gateX/2))&&b.vy<0){b.y=b.r;b.vy=Math.abs(b.vy)*.65}
+    if(b.y+b.r>H&&(world.preparation||!(Math.abs(b.x-W/2)<world.gateX/2))&&b.vy>0){b.y=H-b.r;b.vy=-Math.abs(b.vy)*.65}
+   }
    if(world.preparation){
     const crossLine=b.owner===0?b.y-b.r<H/2+11:b.y+b.r>H/2-11;
     if(crossLine){b.y=b.owner===0?H/2+11+b.r:H/2-11-b.r;b.vy*=-.65;}
-   }else if(b.x<-b.r||b.x>W+b.r||b.y<-b.r||b.y>H+b.r)b.alive=false;
+   }else if(world.cornerKnockout?inStreakCornerOut(b):(b.x<-b.r||b.x>W+b.r||b.y<-b.r||b.y>H+b.r))b.alive=false;
   }
   for(let i=0;i<bs.length;i++)for(let j=i+1;j<bs.length;j++){
    const a=bs[i],b=bs[j];if(!a.alive||!b.alive)continue;
@@ -746,7 +803,10 @@ function evaluateShot(world, shooter,dir,power,spin){
  }
  const after=[0,0];let score=0;
  for(const b of bs)if(b.alive){after[b.owner]++;
-  if(b.owner!==shooter.owner){let goal=Math.min(hypot(b.x-W/2,b.y),hypot(b.x-W/2,H-b.y),hypot(b.x,b.y-H/2),hypot(W-b.x,b.y-H/2));score+=(200-goal)*.025;
+  if(b.owner!==shooter.owner){let goal=world.cornerKnockout
+   ?Math.min(b.x+b.y,W-b.x+b.y,b.x+H-b.y,W-b.x+H-b.y)-STREAK_CORNER_SIZE
+   :Math.min(hypot(b.x-W/2,b.y),hypot(b.x-W/2,H-b.y),hypot(b.x,b.y-H/2),hypot(W-b.x,b.y-H/2));
+   score+=(200-goal)*.025;
   }
  }
  const enemy=1-shooter.owner;
@@ -766,7 +826,7 @@ function packWorld(world){
  const bKeys=['id','text','word','owner','merged','ability','x','y','vx','vy','angle','omega','mass','invM','invI','w','h','radius','scale','growthStacks','lastGrowthTime','shotDir','parts','burstAge','burstStage','homingLeft','burstFired','shockArmed','vortexArmed','vortexTriggered','strikeSpent','strikeFirstEnemyId','splitTier','attackFactor','splitLockUntil','splitQueued','awakened','awakenAt','alive','shotAt','isLaunched','vortexHitEnemy','wallBoostAt','reflectAt','magnetArmed','magnetTriggered'];
  return {
   time:world.time,preparation:world.preparation,prepTurns:world.prepTurns,shotSerial:world.shotSerial,splitUsedShot:world.splitUsedShot,
-  gateX:world.gateX,gateY:world.gateY,suddenDeath:world.suddenDeath,suddenTurns:world.suddenTurns,
+  gateX:world.gateX,gateY:world.gateY,suddenDeath:world.suddenDeath,suddenTurns:world.suddenTurns,cornerKnockout:!!world.cornerKnockout,
   shooterId:world.shooterId,lastShooterOwner:world.lastShooterOwner,shotTime:world.shotTime,
   awakenedOwners:[...world.awakenedOwners],fields:world.fields.map(f=>({...f})),
   magnets:world.magnets.map(m=>({...m,center:{...m.center},targets:[...m.targets]})),
@@ -778,7 +838,7 @@ function packWorld(world){
 function unpackWorld(snapshot){
  if(!snapshot||!Array.isArray(snapshot.bodies)||snapshot.bodies.length>72)throw Error('盤面データが不正です');
  const w=newWorld();
- for(const key of ['time','preparation','prepTurns','shotSerial','splitUsedShot','gateX','gateY','suddenDeath','suddenTurns','shooterId','lastShooterOwner','shotTime']){
+ for(const key of ['time','preparation','prepTurns','shotSerial','splitUsedShot','gateX','gateY','suddenDeath','suddenTurns','cornerKnockout','shooterId','lastShooterOwner','shotTime']){
   if(snapshot[key]!==undefined)w[key]=snapshot[key];
  }
  w.awakenedOwners=new Set(snapshot.awakenedOwners||[]);
@@ -801,12 +861,12 @@ function unpackWorld(snapshot){
  // Reset to the canonical next ID; practice sessions on one device must not
  // change future online merge/split IDs on that device.
  idSeq=Math.max(1,...w.bodies.map(b=>b.id+1));
- w.walls=walls(w.gateX,w.gateY,w.preparation);
+ w.walls=w.cornerKnockout?streakWalls():walls(w.gateX,w.gateY,w.preparation);
  w.shocks=[];w.vortices=[];
  w.magnets=(Array.isArray(snapshot.magnets)&&snapshot.magnets.length<=4?snapshot.magnets:[])
   .filter(m=>m&&Number.isFinite(m.age)&&Number.isFinite(m.duration)&&Number.isFinite(m.center?.x)&&Number.isFinite(m.center?.y)&&Array.isArray(m.targets)&&m.targets.length<=72)
   .map(m=>({...m,center:{...m.center},targets:[...m.targets]}));
  return w;
 }
-global.KanjiPhysics={packWorld,unpackWorld,W,H,WORDS,PIECE_UNIT,FULL_SHOT_SPEED,NORMAL_FULL_IMPULSE,shockFullImpulse,attackMultiplier,SHOCK_JUMP_PIECES,SHOCK_RADIUS_PIECES,SHOCK_JUMP_SECONDS,shockJumpPieces,shockLanding,VORTEX_RADIUS_PIECES,SPLIT_SCALES,splitPiece,ABILITY_RULES,body,newWorld,spawnInitial,step,fire,settle,remaining,allStopped,createMerged,triggerShock,awakenPiece,shapeFor,manifold,evaluateShot,finishTurn,openArena,sealPracticeArena,setStreakArena,expandGates,CORNER_SIZE,defenseFactor,fieldPosition,growGiant,startVortex,startMagnet,MAGNET_RANGE,MAGNET_DURATION,RICOCHET_BOOST,REFLECT_MULTIPLIER,clamp};
+global.KanjiPhysics={packWorld,unpackWorld,W,H,WORDS,PIECE_UNIT,FULL_SHOT_SPEED,NORMAL_FULL_IMPULSE,shockFullImpulse,attackMultiplier,SHOCK_JUMP_PIECES,SHOCK_RADIUS_PIECES,SHOCK_JUMP_SECONDS,shockJumpPieces,shockLanding,VORTEX_RADIUS_PIECES,SPLIT_SCALES,splitPiece,ABILITY_RULES,body,newWorld,spawnInitial,step,fire,settle,remaining,allStopped,createMerged,triggerShock,awakenPiece,shapeFor,manifold,evaluateShot,finishTurn,openArena,sealPracticeArena,setStreakArena,expandGates,CORNER_SIZE,STREAK_CORNER_SIZE,inStreakCornerOut,streakWalls,defenseFactor,fieldPosition,growGiant,startVortex,startMagnet,MAGNET_RANGE,MAGNET_DURATION,RICOCHET_BOOST,REFLECT_MULTIPLIER,clamp};
 })(window);
