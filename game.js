@@ -1,22 +1,22 @@
-/* 漢字おはじき Ver.1.8 | ASOBEAT — preparation and sudden death */
+/* 漢字おはじき Ver.2.0 | ASOBEAT — live-authoritative online sync */
 (function(){'use strict';
 const P=window.KanjiPhysics;if(!P){document.body.textContent='物理エンジンを読み込めませんでした。';return;}
-const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'停止後1秒・敵を自動追尾','衝撃':'引く強さで0.5〜3コマジャンプ・着地後に衝撃波','鉄壁':'ぶつかる攻撃を軽減（能力は普通に受ける）','渦巻':'停止後、半径約3.8コマ内の敵を2.3秒で2周','巨大':'命中で1.2倍巨大化（最大3回）','一撃':'最初の敵だけ3倍！角なら5倍！','分裂':'相手のターンに接触で分裂・1ターン1回'};
+const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'停止後1秒・敵を自動追尾','爆風':'引く強さで0.5〜3コマジャンプ・着地後に衝撃波','鉄壁':'ぶつかる攻撃を軽減（能力は普通に受ける）','渦巻':'停止後、半径約3.8コマ内の敵を2.3秒で2周','巨大':'命中で1.2倍巨大化（最大3回）','一撃':'最初の敵だけ3倍！角なら5倍！','分裂':'相手のターンに接触で分裂・1ターン1回','跳弾':'自ターンの壁衝突で加速（操作していなくても発動）','磁力':'停止後、渦巻と同じ範囲の敵だけを引き寄せ','反射':'相手ターンの衝突で0.7倍の力を反射'};
 const $=id=>document.getElementById(id),ctx=$('board').getContext('2d',{alpha:false});
 const {W,H}=P,PI=Math.PI,TAU=PI*2,clamp=P.clamp;
 const scenes=['home','match','onlineDeck','setup','confirm','game','result'];
-const st={scene:'home',mode:'solo',diff:'normal',decks:[['暴走','衝撃','鉄壁'],['衝撃','鉄壁','暴走']],names:['青チーム','CPU'],world:null,phase:'title',turn:0,spin:1,drag:null,selected:null,fx:[],texts:[],bannerUntil:0,shake:0,flash:0,hitstop:0,time:0,acc:0,moving:0,still:0,shotCount:0,stats:{outs:[0,0],merges:[0,0],crits:[0,0],awakens:[0,0]},vortexPlayed:false,turnToken:0,sound:true,result:null,geom:null};
+const st={scene:'home',mode:'solo',diff:'normal',decks:[['暴走','爆風','鉄壁'],['爆風','鉄壁','暴走']],names:['青チーム','CPU'],world:null,phase:'title',turn:0,spin:1,drag:null,selected:null,fx:[],texts:[],bannerUntil:0,shake:0,flash:0,hitstop:0,time:0,acc:0,moving:0,still:0,shotCount:0,stats:{outs:[0,0],merges:[0,0],crits:[0,0],awakens:[0,0]},vortexPlayed:false,magnetPlayed:false,turnToken:0,sound:true,result:null,geom:null};
 let audio=null,noiseBuffer=null,animLast=0,rafId=0;let timers=[];
-const online={active:false,role:null,uid:null,slot:null,round:0,seq:-1,seenMoveId:null,ownShotId:null,starting:false,revealing:false,publishing:false,resetting:false,committed:false,rematch:false,gameReady:false,pendingRoom:null,lastError:''};
-let onlineDeck=['暴走','衝撃','鉄壁'];
-try{let prior=JSON.parse(localStorage.getItem('asobeat_kanji_online_deck')||'null');if(Array.isArray(prior)&&prior.length===3&&prior.every(w=>WORDS.includes(w)))onlineDeck=prior}catch{}
+const online={active:false,role:null,uid:null,slot:null,round:0,seq:-1,seenMoveId:null,ownShotId:null,starting:false,revealing:false,publishing:false,resetting:false,committed:false,rematch:false,gameReady:false,pendingRoom:null,lastError:'',frameStep:0,frameSentAt:0,frameBusy:false,lastFrameStep:0,lastFrameId:null,shotSeq:-1,frameWarningAt:0,remoteBlend:null};
+let onlineDeck=['暴走','爆風','鉄壁'];
+try{let prior=JSON.parse(localStorage.getItem('asobeat_kanji_online_deck')||'null');if(Array.isArray(prior)&&prior.length===3&&prior.every(w=>WORDS.includes(w)||w==='衝撃'))onlineDeck=prior.map(w=>w==='衝撃'?'爆風':w)}catch{}
 
 function later(fn,ms){const token=st.turnToken;const id=setTimeout(()=>{timers=timers.filter(x=>x!==id);if(token===st.turnToken)fn()},ms);timers.push(id);return id}
 function cancelAsync(){st.turnToken++;for(const id of timers)clearTimeout(id);timers=[]}
 function safeLoad(){try{return JSON.parse(localStorage.getItem('asobeat_kanji_v10')||'{}')}catch(e){return {}}}
 function save(){try{localStorage.setItem('asobeat_kanji_v10',JSON.stringify({names:st.names,decks:st.decks,diff:st.diff,sound:st.sound}))}catch(e){}}
 const saved=safeLoad();if(Array.isArray(saved.names)&&saved.names.length===2)st.names=saved.names.map(x=>String(x||'').slice(0,10));
-if(Array.isArray(saved.decks)&&saved.decks.length===2)for(let i=0;i<2;i++)if(Array.isArray(saved.decks[i])&&saved.decks[i].length===3&&saved.decks[i].every(w=>WORDS.includes(w)))st.decks[i]=saved.decks[i];
+if(Array.isArray(saved.decks)&&saved.decks.length===2)for(let i=0;i<2;i++)if(Array.isArray(saved.decks[i])&&saved.decks[i].length===3&&saved.decks[i].every(w=>WORDS.includes(w)||w==='衝撃'))st.decks[i]=saved.decks[i].map(w=>w==='衝撃'?'爆風':w);
 if(['easy','normal','hard'].includes(saved.diff))st.diff=saved.diff;
 if(typeof saved.sound==='boolean')st.sound=saved.sound;
 function changeScene(scene){st.scene=scene;for(const id of scenes)$(id+'Scene').classList.toggle('hidden',id!==scene);$('roulette').classList.add('hidden');$('modal').classList.add('hidden');window.scrollTo?.(0,0)}
@@ -89,7 +89,7 @@ function roulette(fixedFirst=null,after=null){
 }
 
 function makeNames(){for(let i=0;i<2;i++)$('gameName'+i).textContent=st.names[i]}
-function startMatch(first=null){cancelAsync();st.world=P.newWorld();P.spawnInitial(st.world,st.decks);st.drag=null;st.selected=null;st.fx=[];st.texts=[];st.phase='playing';st.turn=first===null?st.turn:first;st.spin=1;st.hitstop=0;st.shake=0;st.flash=0;st.time=0;st.acc=0;st.moving=0;st.still=0;st.shotCount=0;st.vortexPlayed=false;st.cancelUntil=0;st.result=null;st.stats={outs:[0,0],merges:[0,0],crits:[0,0],awakens:[0,0]};st._impactTimes=new Map();
+function startMatch(first=null){cancelAsync();st.world=P.newWorld();P.spawnInitial(st.world,st.decks);st.drag=null;st.selected=null;st.fx=[];st.texts=[];st.phase='playing';st.turn=first===null?st.turn:first;st.spin=1;st.hitstop=0;st.shake=0;st.flash=0;st.time=0;st.acc=0;st.moving=0;st.still=0;st.shotCount=0;st.vortexPlayed=false;st.magnetPlayed=false;st.cancelUntil=0;st.result=null;st.stats={outs:[0,0],merges:[0,0],crits:[0,0],awakens:[0,0]};st._impactTimes=new Map();
  $('spinRight').classList.add('active');$('spinLeft').classList.remove('active');makeNames();
  $('suddenOverlay').classList.add('hidden');$('suddenOverlay').setAttribute('aria-hidden','true');
  $('effectBanner').classList.add('hidden');$('toast').classList.add('hidden');
@@ -124,24 +124,29 @@ function fireShot(b,dirX,dirY,power,spin,spinStrength=1,fromNetwork=false){
   window.KanjiOnline.sendShot(move).then(shot=>{
    if(st.mode!=='online'||!online.active)return;
    online.ownShotId=shot.id;online.seenMoveId=shot.id;
-   st.phase='playing';fireShot(b,move.dx,move.dy,power,spin,spinStrength,true);
+   st.phase='playing';online.shotSeq=shot.seq;online.frameStep=0;online.frameSentAt=0;online.frameBusy=false;fireShot(b,move.dx,move.dy,power,spin,spinStrength,true);
   }).catch(e=>{st.phase='playing';const msg=networkError(e);showNetworkStatus(msg,'error');toast(msg)});
   return true;
  }
  if(st.phase!=='playing'||!b||!b.alive||b.owner!==st.turn)return false;
  const len=Math.hypot(dirX,dirY);if(len<.01||power<.06)return false;
- P.fire(st.world,b,dirX,dirY,power,spin,spinStrength);st.vortexPlayed=false;st.shotCount++;st.phase='moving';st.moving=0;st.still=0;st.acc=0;st.selected=null;st.drag=null;
+ P.fire(st.world,b,dirX,dirY,power,spin,spinStrength);st.vortexPlayed=false;st.magnetPlayed=false;st.shotCount++;st.phase='moving';st.moving=0;st.still=0;st.acc=0;st.selected=null;st.drag=null;
  $('phaseText').textContent='物理演算中…';$('selectedLabel').textContent=b.text+'、発射！';$('hintLabel').textContent='全コマが止まると交代';
  addParticles(b.x,b.y,10,st.turn===0?'#70c5f7':'#f4a29c',1);st.shake=2.6;sound('shoot');$('aimHint').classList.add('hidden');$('spinMeter').textContent='回転力 --';
- if(b.ability==='shock'&&!st.world.preparation)showEffect('衝撃：0.5秒ジャンプ → 着地で円形波！',850);
+ if(b.ability==='shock'&&!st.world.preparation)showEffect('爆風：0.5秒ジャンプ → 着地で円形波！',850);
  if(b.ability==='iron'&&!st.world.preparation)showEffect('鉄壁：自ターン終了時に護陣！',900);
  if(b.ability==='vortex'&&!st.world.preparation)showEffect('渦巻：停止後、近くの敵を2周巻き込む！',850);
  if(b.ability==='giant'&&!st.world.preparation)showEffect('巨大：敵への命中で巨大化！',800);
  if(b.ability==='strike'&&!st.world.preparation)showEffect('一撃：最初の敵だけ3倍・角なら5倍！',850);
  if(b.ability==='split'&&!st.world.preparation)showEffect('分裂：相手のターンに接触すると発動！',850);
+ if(b.ability==='ricochet'&&!st.world.preparation)showEffect('跳弾：自分のターンに壁で加速！',850);
+ if(b.ability==='magnet'&&!st.world.preparation)showEffect('磁力：停止後、敵だけを引き寄せ！',850);
+ if(b.ability==='reflect'&&!st.world.preparation)showEffect('反射：敵からの衝撃を0.7倍で返す！',850);
  return true;
 }
 function collisionHooks(){return {
+ wallBoost:({piece,p})=>{addParticles(p.x,p.y,22,'#ffc95c',1.0);showText('跳弾 加速!',piece.x,piece.y,'#ffe6a1');sound('crit');},
+ reflect:({shield,intruder,p})=>{addRing(shield.x,shield.y,'#a9f3fd',shield.radius*1.3);showText('反射 70%!',p.x,p.y,'#aefaff');sound('crit');},
  impact:({a,b,p,speed,corner,impulse,skill,firstStrike})=>{
   const shooter=(a.id===st.world.shooterId?a:b.id===st.world.shooterId?b:null);
   // Collisions may generate adjacent contact manifolds: one SFX per pair / 120 ms.
@@ -187,7 +192,7 @@ function collisionHooks(){return {
   st.shake=5.5;st.hitstop=Math.max(st.hitstop,.05);st.flash=.32;
   addRing(wave.x,wave.y,'#a7ffff',P.PIECE_UNIT);
   addParticles(wave.x,wave.y,20,'#82f4ff',.95);
-  showText('衝撃着地！',wave.x,wave.y,'#dcffff');showEffect('衝撃！ 円の中の全員を外へ吹き飛ばす！',930);sound('shock');
+  showText('爆風着地！',wave.x,wave.y,'#dcffff');showEffect('爆風！ 円の中の全員を外へ吹き飛ばす！',930);sound('shock');
  },
  shockHit:(wave,target,impulse)=>{
   addParticles(target.x,target.y,Math.max(5,Math.round(impulse/100)),'#8ddbf3',.65);
@@ -211,6 +216,14 @@ function tickPhysics(dt){if(st.hitstop>0){st.hitstop=Math.max(0,st.hitstop-dt);r
  if(st.moving>.58&&P.allStopped(st.world))st.still+=dt;else st.still=0;
  if(st.still>.48||st.moving>12.5){
    const shooter=st.world.bodies.find(b=>b.id===st.world.shooterId&&b.alive);
+   if(!st.magnetPlayed&&!st.world.preparation&&shooter?.ability==='magnet'){
+    st.magnetPlayed=true;const m=P.startMagnet(st.world,shooter);
+    if(m){
+     st.still=0;st.moving=0;st.acc=0;
+     addRing(shooter.x,shooter.y,'#6adacb',m.range);addParticles(shooter.x,shooter.y,25,'#87e2c9',1.0);
+     showEffect('磁力発動！ 範囲内の敵のみ吸引！',1150);sound('shock');return;
+    }
+   }
    if(!st.vortexPlayed&&!st.world.preparation&&shooter?.ability==='vortex'){
     st.vortexPlayed=true;
     const v=P.startVortex(st.world,shooter);
@@ -468,6 +481,9 @@ function drawPiece(b,context=ctx,selected=st.selected){const ctx=context;const c
   if(b.ability==='iron'){ctx.lineWidth=2;ctx.strokeStyle='#d1ab66cc';ctx.strokeRect(-b.w*.53/scale,-b.h*.57/scale,b.w*1.06/scale,b.h*1.14/scale)}
   if(b.ability==='giant'){ctx.strokeStyle='#dcac39';ctx.lineWidth=2;ctx.strokeRect(-b.w*.52/scale,-b.h*.52/scale,b.w*1.04/scale,b.h*1.04/scale)}
   if(b.ability==='vortex'){ctx.strokeStyle='#9875ca';ctx.lineWidth=2;ctx.beginPath();ctx.arc(0,0,Math.max(b.w,b.h)*.68/scale,0,TAU);ctx.stroke()}
+  if(b.ability==='ricochet'){ctx.strokeStyle='#efa93d';ctx.lineWidth=2.5/scale;ctx.strokeRect(-b.w*.54/scale,-b.h*.55/scale,b.w*1.08/scale,b.h*1.10/scale)}
+  if(b.ability==='magnet'){ctx.strokeStyle='#27bfa5';ctx.lineWidth=3/scale;ctx.beginPath();ctx.arc(0,0,Math.max(b.w,b.h)*.62/scale,0,TAU);ctx.stroke()}
+  if(b.ability==='reflect'){ctx.strokeStyle='#8ae2fb';ctx.lineWidth=2.8/scale;ctx.beginPath();ctx.arc(0,0,Math.max(b.w,b.h)*.60/scale,0,TAU);ctx.stroke()}
   if(b.ability==='split'){ctx.strokeStyle=b.owner===0?'#6dc4ee':'#e993ac';ctx.lineWidth=2.5/scale;ctx.beginPath();ctx.arc(0,0,Math.max(b.w,b.h)*.53/scale,0,TAU);ctx.stroke()}
  const shape=P.shapeFor(b.text),font=`1000 ${shape.fontSize}px "Noto Sans CJK JP","Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif`;
  ctx.font=font;ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineJoin='round';ctx.miterLimit=2;
@@ -509,6 +525,14 @@ function drawVortices(world=st.world,context=ctx){const ctx=context;
   ctx.restore();
  }
 }
+function drawMagnets(world=st.world,context=ctx){const ctx=context;for(const m of world.magnets){
+   const fade=Math.max(0,1-m.age/m.duration);ctx.save();ctx.translate(m.center.x,m.center.y);
+   ctx.strokeStyle=`rgba(42,196,170,${.75*fade})`;ctx.lineWidth=3;ctx.setLineDash([6,9]);
+   ctx.beginPath();ctx.arc(0,0,m.range,0,TAU);ctx.stroke();ctx.setLineDash([]);
+   ctx.strokeStyle=`rgba(62,230,200,${.9*fade})`;ctx.lineWidth=3;
+   for(let i=0;i<8;i++){const a=i*Math.PI/4+m.age*2;const r=m.range*(.95-.6*m.age/m.duration);ctx.beginPath();ctx.moveTo(Math.cos(a)*r,Math.sin(a)*r);ctx.lineTo(Math.cos(a)*(r-30),Math.sin(a)*(r-30));ctx.stroke()}
+   ctx.restore();
+  }}
 function drawTrails(dt){for(const b of st.world.bodies){if(!b.alive)continue;
   const speed=Math.hypot(b.vx,b.vy);b.trailTime+=dt;
   if(speed>120&&b.trailTime>.045){b.trailTime=0;b.trail.unshift({x:b.x,y:b.y,angle:b.angle,t:0});if(b.trail.length>7)b.trail.pop()}
@@ -561,14 +585,14 @@ function paint(dt){if(!st.world||st.scene!=='game')return;
  ctx.setTransform($('board').width/W,0,0,$('board').height/H,0,0);ctx.clearRect(0,0,W,H);
  ctx.save();if(st.shake>.1)ctx.translate((Math.random()-.5)*st.shake*1.2,(Math.random()-.5)*st.shake*1.2);
  ctx.drawImage(artCanvas,0,0,W,H);
- drawArenaGeometry();drawFields();drawVortices();drawTrails(dt);
+ drawArenaGeometry();drawFields();drawVortices();drawMagnets();drawTrails(dt);
  for(const b of st.world.bodies)if(b.alive){drawPiece(b)}
  drawDrag();drawOverlays();
  if(st.flash>0){ctx.fillStyle=`rgba(255,250,214,${st.flash*.48})`;ctx.fillRect(0,0,W,H)}
  ctx.restore();
 }
 function mainLoop(ts){let dt=animLast?Math.min(.06,(ts-animLast)/1000):.016;animLast=ts;st.time+=dt;
- if(st.scene==='game'){if(st.phase==='moving')tickPhysics(dt);renderFx(dt);paint(dt)}
+ if(st.scene==='game'){if(st.phase==='moving')tickPhysics(dt);if(st.phase==='remoteStream')updateRemoteBlend(ts);renderFx(dt);paint(dt)}
  rafId=requestAnimationFrame(mainLoop)
 }
 // ===== Online mode: matchmaking, hidden deck lock, turn-by-turn sync =====
@@ -592,12 +616,12 @@ async function joinOnlineRoom(){
   st.names[0]=name;save();net.setListener(handleOnlineRoom);
   const connected=await net.connect(code,name);online.active=true;online.role=connected.role;online.uid=connected.uid;
   online.slot=connected.role==='host'?0:1;online.round=0;online.seq=-1;online.seenMoveId=null;
-  online.ownShotId=null;online.starting=false;online.revealing=false;online.publishing=false;online.rematch=false;online.committed=false;online.gameReady=false;
+  online.ownShotId=null;online.starting=false;online.revealing=false;online.publishing=false;online.rematch=false;online.committed=false;online.gameReady=false;online.lastFrameStep=0;online.lastFrameId=null;online.remoteBlend=null;
   $('waitingPanel').classList.remove('hidden');$('roomJoinBtn').classList.add('hidden');
   $('waitingHeadline').textContent='友達の参加を待っています…';
   $('waitingSub').textContent='同じ合言葉を入力してもらってください';
   window.KanjiPractice?.start();
-  if(net.latest)handleOnlineRoom(net.latest,{});
+  if(net.latest)handleOnlineRoom(net.latest,net.latestMeta||{});
  }catch(e){$('roomJoinBtn').disabled=false;$('roomJoinBtn').textContent='合言葉でマッチング →';onlineUIError(networkError(e));}
 }
 function onlineDeckSelect(){const host=$('onlineDeckOptions');host.textContent='';
@@ -634,12 +658,18 @@ async function lockOnlineDeck(){const net=window.KanjiOnline;if(!net||!online.ac
 }
 function resetOnlineViewForRound(round){
  online.round=round;online.seq=-1;online.seenMoveId=null;online.ownShotId=null;
- online.starting=false;online.revealing=false;online.committed=false;online.publishing=false;online.resetting=false;online.rematch=false;online.gameReady=false;
+ online.starting=false;online.revealing=false;online.committed=false;online.publishing=false;online.resetting=false;online.rematch=false;online.gameReady=false;online.frameBusy=false;online.lastFrameStep=0;online.lastFrameId=null;online.shotSeq=-1;online.remoteBlend=null;
 }
 function handleOnlineRoom(room,meta={}){
  if(st.mode!=='online'||!online.active)return;
  if(meta.error){const msg=meta.error;if(st.scene==='match')onlineUIError(msg);else showNetworkStatus(msg,'error');return;}
  if(!room)return;
+ // Cached snapshots may belong to an older round/turn. Wait for confirmed
+ // Firestore data before changing the board, turn, or replaying a move.
+ if(meta.fromCache){
+  if(st.scene==='game')showNetworkStatus('サーバーの最新状態を確認中…','pending');
+  return;
+ }
  online.pendingRoom=room;
  if(room.stage==='closed'){
   window.KanjiPractice?.stop();
@@ -687,8 +717,16 @@ function handleOnlineRoom(room,meta={}){
   if(st.scene==='game'){
    if(room.seq>online.seq){enterOnlineSnapshot(room);return;}
    if(room.move&&room.move.seq===online.seq&&room.move.id!==online.seenMoveId){
-    if(room.move.by===online.uid){online.seenMoveId=room.move.id;}
-    else replayOnlineMove(room.move);
+    if(room.move.by===online.uid){
+     // A reload can abandon an already-accepted shot. Re-run the exact shot
+     // from the last committed board and publish it rather than soft-locking.
+     if(!online.ownShotId&&st.phase==='playing')resumeOwnOnlineMove(room.move);
+     else online.seenMoveId=room.move.id;
+    }else replayOnlineMove(room.move);
+   }
+   // Movement is display-only for the receiver: the shooter is the physics authority.
+   if(room.move&&room.move.by!==online.uid&&room.move.seq===online.seq){
+    applyRemoteFrame(room);
    }
    if(st.phase==='playing')showNetworkStatus(room.turn===online.slot?'あなたのターン！ 漢字を選んで発射':'相手のターンです。発射を待っています');
   }return;
@@ -710,20 +748,31 @@ function handleOnlineRoom(room,meta={}){
 }
 function enterOnlineSnapshot(room){
  if(!room?.game||!online.active)return;
- const firstEntry=st.scene!=='game'&&st.scene!=='result';
- if(firstEntry){cancelAsync();st.fx=[];st.texts=[];st.flash=0;st.shake=0;st.hitstop=0;st.acc=0;st.moving=0;st.still=0;st.vortexPlayed=false;}
+ cancelAsync();st.fx=[];st.texts=[];st.flash=0;st.shake=0;st.hitstop=0;st.acc=0;st.moving=0;st.still=0;st.vortexPlayed=false;st._impactTimes=new Map();
+ $('suddenOverlay').classList.add('hidden');$('suddenOverlay').setAttribute('aria-hidden','true');
  try{st.world=P.unpackWorld(room.game)}catch(e){showNetworkStatus('盤面の読み込みに失敗しました。再読み込みしてください。','error');return;}
  st.names=[room.hostName,room.guestName];
  st.decks=[room.hostReveal.deck,room.guestReveal.deck];
  st.turn=room.turn;st.shotCount=room.seq;st.stats=room.stats||freshStats();
- online.seq=room.seq;online.seenMoveId=null;online.ownShotId=null;online.gameReady=true;
+ online.seq=room.seq;online.seenMoveId=null;online.ownShotId=null;online.gameReady=true;online.lastFrameStep=0;online.lastFrameId=null;online.frameBusy=false;online.shotSeq=-1;online.remoteBlend=null;
  if(room.stage==='result'){
   st.phase='playing';st.scene='game';finishGame(room.result?.winner??-1);
   return;
  }
  st.phase='playing';changeScene('game');resizeCanvas();beginTurn();
- if(room.move&&room.move.seq===room.seq&&room.move.by!==online.uid)replayOnlineMove(room.move);
+ if(room.move&&room.move.seq===room.seq){
+  if(room.move.by===online.uid)resumeOwnOnlineMove(room.move);
+  else {replayOnlineMove(room.move);applyRemoteFrame(room);}
+ }
  if(st.world.suddenDeath&&room.seq>0){showEffect('⚠️ サドンデス！ 場外が毎ターン広がる',900);}
+}
+function resumeOwnOnlineMove(move){
+ if(!online.active||st.mode!=='online'||!move||move.seq!==online.seq||st.phase!=='playing')return;
+ online.ownShotId=move.id;online.shotSeq=move.seq;online.frameStep=0;
+ online.frameSentAt=0;online.frameBusy=false;
+ replayOnlineMove(move);
+ if(st.phase==='moving')showNetworkStatus('未完了の発射を復旧して同期中…','pending');
+ else {online.ownShotId=null;showNetworkStatus('発射の復旧に失敗しました。もう一度読み込んでください。','error');}
 }
 function replayOnlineMove(move){
  if(st.scene!=='game'||st.phase!=='playing'||move.seq!==online.seq)return;
@@ -732,6 +781,56 @@ function replayOnlineMove(move){
  if(!b){showNetworkStatus('相手の手を同期できません。盤面更新を待っています。','error');st.phase='syncing';return;}
  fireShot(b,move.dx,move.dy,move.power,move.spin,move.spinStrength,true);
  showNetworkStatus('相手の発射を再生中…','pending');
+}
+// Every ~650ms publish an authoritative in-flight picture of the board.
+// No extra Firestore writes when nobody is moving, outside an actual shot,
+// or while a previous frame is still being sent.
+function sendLiveFrame(){
+ if(st.mode!=='online'||!online.active||!online.ownShotId||online.publishing||online.frameBusy||st.phase!=='moving')return;
+ const now=performance.now();if(now-online.frameSentAt<650)return;
+ online.frameBusy=true;online.frameSentAt=now;
+ const id=online.ownShotId,seq=online.shotSeq,step=++online.frameStep;
+ const snapshot=P.packWorld(st.world);
+ window.KanjiOnline.pushFrame(id,seq,step,snapshot)
+  .catch(()=>{/* Keep playing; the final transactional state is authoritative. */})
+  .finally(()=>{if(online.ownShotId===id)online.frameBusy=false;});
+}
+function applyRemoteFrame(room){
+ const frame=room.liveFrame,move=room.move;
+ if(!frame||!move||frame.id!==move.id||frame.seq!==online.seq||move.by===online.uid)return;
+ if(online.lastFrameId===frame.id&&frame.step<=online.lastFrameStep)return;
+ if(st.scene!=='game'||!['moving','remoteStream','syncing'].includes(st.phase))return;
+ try{
+  const w=P.unpackWorld(frame.world);
+  const oldById=new Map((st.world?.bodies||[]).filter(b=>b.alive).map(b=>[b.id,{x:b.x,y:b.y,angle:b.angle}]));
+  const blend=[];
+  for(const b of w.bodies){
+   const before=oldById.get(b.id);
+   if(!before||Math.hypot(before.x-b.x,before.y-b.y)>240)continue;
+   blend.push({body:b,from:before,to:{x:b.x,y:b.y,angle:b.angle}});
+   b.x=before.x;b.y=before.y;b.angle=before.angle;
+  }
+  online.remoteBlend={start:performance.now(),duration:420,items:blend};
+  st.world=w;st.shotCount=room.seq+1;st.turn=room.turn;
+  st.phase='remoteStream';st.hitstop=0;st.acc=0;st.moving=0;st.still=0;st.drag=null;
+  online.lastFrameId=frame.id;online.lastFrameStep=frame.step;
+  updateHud();updateFieldStatus();
+  showNetworkStatus('相手の盤面を同期表示中…','pending');
+ }catch(e){showNetworkStatus('途中経過の同期を再試行中…','pending');}
+}
+// Smooth 650ms authoritative packet updates without running a second,
+// potentially divergent physics simulation on the receiving device.
+function updateRemoteBlend(ts){
+ const blend=online.remoteBlend;if(!blend)return;
+ const a=clamp((ts-blend.start)/blend.duration,0,1);
+ const t=a*a*(3-2*a);
+ for(const item of blend.items){
+  const {body,from,to}=item;
+  body.x=from.x+(to.x-from.x)*t;body.y=from.y+(to.y-from.y)*t;
+  const da=Math.atan2(Math.sin(to.angle-from.angle),Math.cos(to.angle-from.angle));
+  body.angle=from.angle+da*t;
+ }
+ if(a>=1)online.remoteBlend=null;
 }
 function publishOnlineTurn(){
  if(!online.active||!online.ownShotId||online.publishing)return;
@@ -742,7 +841,9 @@ function publishOnlineTurn(){
  let attempts=0;
  async function send(){
   try{await window.KanjiOnline.finishShot(id,snapshot,turn,stats,result);online.publishing=false;}
-  catch(e){if(++attempts<=3&&online.active){showNetworkStatus('送信を再試行しています…','pending');setTimeout(send,1400*attempts)}
+  catch(e){const done=window.KanjiOnline?.latest;
+   if(done&&done.seq>online.shotSeq){online.publishing=false;return;}
+   if(++attempts<=3&&online.active){showNetworkStatus('送信を再試行しています…','pending');setTimeout(send,1400*attempts)}
    else{online.publishing=false;showNetworkStatus('ターン同期に失敗しました。通信を確認して画面を再読み込みしてください。','error')}}
  }
  send();
@@ -756,7 +857,7 @@ async function requestOnlineRematch(){
 }
 async function leaveOnlineRoom(){
  const net=window.KanjiOnline;online.active=false;cancelAsync();window.KanjiPractice?.stop();
- st.phase='title';st.drag=null;st.selected=null;online.gameReady=false;
+ st.phase='title';st.drag=null;st.selected=null;online.gameReady=false;online.remoteBlend=null;
  if(net)await net.leave();
  $('roomJoinBtn').classList.remove('hidden');$('roomJoinBtn').disabled=false;$('roomJoinBtn').textContent='合言葉でマッチング →';
  closeModal();changeScene('home');st.mode='solo';
@@ -796,7 +897,7 @@ $('rematchBtn').addEventListener('click',()=>{if(st.mode==='online'){requestOnli
 $('resultHomeBtn').addEventListener('click',()=>{if(st.mode==='online')leaveOnlineRoom();else{cancelAsync();st.phase='title';changeScene('home')}});
 function abilityManualHTML(){
  const explanation='<div class="ability-definition"><b>攻撃</b>：漢字同士がぶつかって飛ばすこと。暴走で追いかけてぶつかった場合も攻撃です。'+
-  '<br><b>能力</b>：漢字の技で相手を動かすこと。「衝撃」や「渦巻」がこれにあたります。'+
+  '<br><b>能力</b>：漢字の技で相手を動かすこと。「爆風」「渦巻」「磁力」などがこれにあたります。'+
   '<br><b>連続ヒット</b>：技で飛ばされたコマが別のコマにぶつかったら、それは攻撃です。</div>';
  const rows=P.ABILITY_RULES.map(a=>`<tr><th scope="row">${a.word}<small>${a.kind}</small></th><td><b>${a.numbers}</b><br><span>${a.timing}</span></td></tr>`).join('');
  return explanation+`<div class="ability-scroll"><table class="ability-table"><thead><tr><th>漢字</th><th>何が起こる？ どのくらい強い？</th></tr></thead><tbody>${rows}</tbody></table></div>`+
@@ -823,7 +924,7 @@ window.KanjiRenderer={drawPractice(canvas,world,selected,drag){
  const c=canvas.getContext('2d',{alpha:false});
  c.setTransform(canvas.width/W,0,0,canvas.height/H,0,0);
  c.clearRect(0,0,W,H);c.drawImage(artCanvas,0,0,W,H);
- drawArenaGeometry(world,c);drawFields(world,c);drawVortices(world,c);
+ drawArenaGeometry(world,c);drawFields(world,c);drawVortices(world,c);drawMagnets(world,c);
  for(const b of world.bodies)if(b.alive)drawPiece(b,c,selected);
  for(const wave of world.shocks){
   const fade=Math.max(0,1-wave.age/.59);c.save();c.globalAlpha=fade;

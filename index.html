@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
   <meta name="theme-color" content="#151f30">
   <meta name="description" content="漢字を弾いて、熟語に合体！角当てクリティカルで相手を場外へ。ASOBEATの無料対戦おはじきゲーム。">
-  <title>漢字おはじき Ver.1.8 | ASOBEAT</title>
-  <link rel="stylesheet" href="style.css?v=18">
-  <script defer src="physics.js?v=18"></script>
-  <script defer src="game.js?v=18"></script>
-  <script defer src="practice.js?v=18"></script>
-  <script type="module" src="online.js?v=18"></script>
+  <title>漢字おはじき Ver.2.0 | ASOBEAT</title>
+  <link rel="stylesheet" href="style.css?v=20">
+  <script defer src="physics.js?v=20"></script>
+  <script defer src="game.js?v=20"></script>
+  <script defer src="practice.js?v=20"></script>
+  <script type="module" src="online.js?v=20"></script>
 </head>
 <body>
 <div id="app">
@@ -56,8 +56,8 @@
       <div class="waiting-status"><span class="online-pulse"></span><div><b id="waitingHeadline">相手を待っています…</b><small id="waitingSub">友達に合言葉を伝えてください</small></div></div>
       <div class="practice-head"><b>本番ステージで試し打ち！</b><small>この練習は対戦に影響しません</small></div>
       <div class="practice-options" aria-label="練習する熟語の選択">
-        <label class="practice-select blue"><span>🔵 あなた</span><select id="practiceWord" aria-label="自分の完成済み熟語"><option>暴走</option><option>衝撃</option><option>鉄壁</option><option>渦巻</option><option>巨大</option><option>一撃</option><option>分裂</option></select></label>
-        <label class="practice-select red"><span>🔴 CPU</span><select id="practiceOpponentWord" aria-label="CPUの完成済み熟語"><option>暴走</option><option>衝撃</option><option>鉄壁</option><option>渦巻</option><option>巨大</option><option>一撃</option><option>分裂</option></select></label>
+        <label class="practice-select blue"><span>🔵 あなた</span><select id="practiceWord" aria-label="自分の完成済み熟語"><option>暴走</option><option>爆風</option><option>鉄壁</option><option>渦巻</option><option>巨大</option><option>一撃</option><option>分裂</option><option>跳弾</option><option>磁力</option><option>反射</option></select></label>
+        <label class="practice-select red"><span>🔴 CPU</span><select id="practiceOpponentWord" aria-label="CPUの完成済み熟語"><option>暴走</option><option>爆風</option><option>鉄壁</option><option>渦巻</option><option>巨大</option><option>一撃</option><option>分裂</option><option>跳弾</option><option>磁力</option><option>反射</option></select></label>
       </div>
       <div class="practice-tools"><span id="practiceTurn" class="practice-turn">先攻：あなた</span><span class="practice-blocked">四辺の場外は封鎖中</span><button id="practiceReset" type="button">↻ 最初から</button></div>
       <canvas id="practiceBoard" width="540" height="760" aria-label="本番と同じ漢字コマと盤面を使用する試し打ち。場外はすべて封鎖されています"></canvas>

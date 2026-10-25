@@ -1,4 +1,4 @@
-/* 漢字おはじき Ver.1.8: dependency-free 2D compound-SAT impulse solver.
+/* 漢字おはじき Ver.2.0: dependency-free 2D compound-SAT impulse solver.
    World units: board coordinates 540 x 760. Time: seconds. Clockwise rotation is positive.
    Runs physics at a fixed 1/120 second timestep in game.js, render separately.
 */
@@ -12,7 +12,8 @@ const FULL_SHOT_SPEED=230+875;
 const NORMAL_RESTITUTION=.73;
 const NORMAL_FULL_IMPULSE=(1+NORMAL_RESTITUTION)*FULL_SHOT_SPEED/2;
 const SHOCK_JUMP_PIECES=3, SHOCK_RADIUS_PIECES=1;
-const VORTEX_RADIUS_PIECES=235/PIECE_UNIT; // Original Ver.1.2 vortex: radius 235 units, enemy-only, two outward turns.
+const VORTEX_RADIUS_PIECES=235/PIECE_UNIT;
+const MAGNET_RANGE=235, MAGNET_DURATION=.9, RICOCHET_BOOST=1.27, REFLECT_MULTIPLIER=.7; // Original Ver.1.2 vortex: radius 235 units, enemy-only, two outward turns.
 const SPLIT_SCALES=[1,2/3,1/3];
 // Aim strength changes jump distance smoothly: weak shots ≈0.5 tile, full = 3 tiles.
 function shockJumpPieces(power){return .5+2.5*Math.pow(clamp(power,0,1),1.1)}
@@ -24,14 +25,17 @@ function shockLanding(b,dx,dy,power){
 const SHOCK_JUMP_SECONDS=.5;
 const ABILITY_RULES=[
  {word:'暴走',kind:'追いかける',timing:'止まったあと、いちばん近い相手へ走ります。ぶつかると普通の攻撃です。',numbers:'追いかけ：1秒／攻撃：1倍'},
- {word:'衝撃',kind:'吹き飛ばす',timing:'矢印を長く引くほど遠くへジャンプ！ 着地した円の中の全員を外へ飛ばします。',numbers:'ジャンプ：最大3コマ（引く強さで細かく調整）／着地：0.5秒後／円：半径1コマ／威力100％'},
- {word:'鉄壁',kind:'守る',timing:'ぶつかる攻撃には強い！ でも衝撃と渦巻では普通に動きます。',numbers:'自分が受ける攻撃：0.6倍／青・赤の円にいる味方：0.7倍／円の広さ：半径3コマ'},
+ {word:'爆風',kind:'吹き飛ばす',timing:'矢印を長く引くほど遠くへジャンプ！ 着地した円の中の全員を外へ飛ばします。',numbers:'ジャンプ：最大3コマ（引く強さで細かく調整）／着地：0.5秒後／円：半径1コマ／威力100％'},
+ {word:'鉄壁',kind:'守る',timing:'ぶつかる攻撃には強い！ でも爆風と渦巻では普通に動きます。',numbers:'自分が受ける攻撃：0.6倍／青・赤の円にいる味方：0.7倍／円の広さ：半径3コマ'},
  {word:'渦巻',kind:'敵を渦に巻き込む',timing:'発射して止まると発動。近くの敵だけが外へ広がる渦を2周します（敵への直撃は不要）。',numbers:'時間：2.3秒／2周／範囲：半径約3.8コマ（235）／外向きに拡大'},
  {word:'巨大',kind:'大きくなる',timing:'相手に当てるたび大きく、強くなります。最後まで元に戻りません。',numbers:'1回ごと：大きさ1.2倍・攻撃1.1倍／3回まで'},
  {word:'一撃',kind:'超強力な攻撃',timing:'最初にぶつかった敵1個だけを特大パワーで飛ばします。次の敵には普通の威力です。',numbers:'最初の敵：普通3倍／角なら合計5倍／2回目から通常'},
- {word:'分裂',kind:'相手の攻撃で増える',timing:'相手のターンに敵コマと接触すると2個に分裂。自分のターンには発動しません。',numbers:'分裂は味方全体で1ターン1回。1個→2個（2/3サイズ）→最大4個（1/3サイズ）'}
+ {word:'分裂',kind:'相手の攻撃で増える',timing:'相手のターンに敵コマと接触すると2個に分裂。自分のターンには発動しません。',numbers:'分裂は味方全体で1ターン1回。1個→2個（2/3サイズ）→最大4個（1/3サイズ）'},
+ {word:'跳弾',kind:'壁で加速',timing:'自分のターン中に壁や四隅の障害物にぶつかると、反射した後の速度が上がります。跳弾を直接操作していなくても発動。',numbers:'反射後の速度：衝突前の約1.27倍／連続判定を防ぐため0.18秒間隔／速度上限1800'},
+ {word:'磁力',kind:'敵を引き寄せる',timing:'磁力コマを発射して停止した後、周囲の敵だけを自分の方向へ引き寄せます。味方は動きません。',numbers:'範囲：半径約3.8コマ（235）＝渦巻と同じ／吸引：0.9秒'},
+ {word:'反射',kind:'攻撃を返す',timing:'相手のターン中に敵コマに衝突されると、その相手へ衝突の力の0.7倍を追加で返します。',numbers:'反射力：衝突インパルスの0.7倍／同一接触での連続発動を防止'}
 ];
-const WORDS={"暴走":{label:'暴走',ability:'burst'},"衝撃":{label:'衝撃',ability:'shock'},"鉄壁":{label:'鉄壁',ability:'iron'},"渦巻":{label:'渦巻',ability:'vortex'},"巨大":{label:'巨大',ability:'giant'},"一撃":{label:'一撃',ability:'strike'},"分裂":{label:'分裂',ability:'split'}};
+const WORDS={"暴走":{label:'暴走',ability:'burst'},"爆風":{label:'爆風',ability:'shock'},"鉄壁":{label:'鉄壁',ability:'iron'},"渦巻":{label:'渦巻',ability:'vortex'},"巨大":{label:'巨大',ability:'giant'},"一撃":{label:'一撃',ability:'strike'},"分裂":{label:'分裂',ability:'split'},"跳弾":{label:'跳弾',ability:'ricochet'},"磁力":{label:'磁力',ability:'magnet'},"反射":{label:'反射',ability:'reflect'}};
 const mCan = document.createElement('canvas');mCan.width=300;mCan.height=110;
 const mCtx=mCan.getContext('2d',{willReadFrequently:true});
 const shapeCache=new Map();let idSeq=1;
@@ -71,7 +75,7 @@ function body({x,y,text,owner,word,merged=false,angle=0,vx=0,vy=0,omega=0}){
  const s=shapeFor(text),ability=merged?(WORDS[word]?.ability||null):null;
  const mass=merged?2.1:1;
  const inertia=mass*(s.w*s.w+s.h*s.h)/12;
- return {id:idSeq++,text,word,owner,merged,ability,x,y,vx,vy,angle,omega,mass,invM:1/mass,invI:1/inertia,w:s.w,h:s.h,parts:s.parts,radius:hypot(s.w,s.h)*.58+6,scale:1,growthStacks:0,lastGrowthTime:-100,shotDir:{x:1,y:0},burstAge:null,burstStage:null,homingLeft:0,burstFired:false,shockArmed:false,vortexArmed:false,vortexTriggered:false,strikeSpent:false,strikeFirstEnemyId:null,splitTier:0,attackFactor:1,splitLockUntil:0,splitQueued:false,awakened:false,awakenAt:-1,alive:true,merging:false,trail:[],trailTime:0,shotAt:-100,flash:0,jump:null,vortexHitEnemy:false};
+ return {id:idSeq++,text,word,owner,merged,ability,x,y,vx,vy,angle,omega,mass,invM:1/mass,invI:1/inertia,w:s.w,h:s.h,parts:s.parts,radius:hypot(s.w,s.h)*.58+6,scale:1,growthStacks:0,lastGrowthTime:-100,shotDir:{x:1,y:0},burstAge:null,burstStage:null,homingLeft:0,burstFired:false,shockArmed:false,vortexArmed:false,vortexTriggered:false,strikeSpent:false,strikeFirstEnemyId:null,splitTier:0,attackFactor:1,splitLockUntil:0,splitQueued:false,awakened:false,awakenAt:-1,alive:true,merging:false,trail:[],trailTime:0,shotAt:-100,flash:0,jump:null,vortexHitEnemy:false,wallBoostAt:-99,reflectAt:-99,magnetArmed:false,magnetTriggered:false};
 }
 function staticRect(x,y,w,h){return {id:'wall',owner:-1,x,y,angle:0,vx:0,vy:0,omega:0,invM:0,invI:0,mass:Infinity,parts:[{x:0,y:0,w,h}],radius:hypot(w,h)/2,alive:true,static:true};}
 // Four small, solid corner wedges. The sloping 45-degree face is a REAL collision surface.
@@ -231,6 +235,35 @@ function resolve(world,a,b,m,step,onImpact,attacker,splitRequests){
   if(tden>EPS){const slip=dot(vsub(newB,newA),tangent);const jt=clamp(-slip/tden,-impact*.26,impact*.26);
    applyImpulse(world,a,tangent.x*jt,tangent.y*jt,rA,-1,interaction);applyImpulse(world,b,tangent.x*jt,tangent.y*jt,rB,1,interaction)}
  }
+ // Defensive reflection: ONLY on the opponent's turn and ONLY a physical
+ // enemy-piece collision. Return an extra 70% of this contact's normal impulse
+ // to the opponent; do not deal this force to the reflecting tile itself.
+ if(isEnemy&&!world.preparation&&world.shotSerial>0&&contactSpeed>12){
+  for(const shield of [a,b]){
+   const intruder=shield===a?b:a;
+   if(shield.ability!=='reflect'||shield.owner===world.lastShooterOwner||intruder.owner!==world.lastShooterOwner)continue;
+   if(world.time-shield.reflectAt<.16)continue;
+   shield.reflectAt=world.time;
+   const sign=shield===a?1:-1;
+   const push=impact*REFLECT_MULTIPLIER;
+   applyImpulse(world,intruder,n.x*push,n.y*push,{x:p.x-intruder.x,y:p.y-intruder.y},sign, 'attack');
+   onImpact?.reflect?.({shield,intruder,p,push,step});
+  }
+ }
+ // Ricochet speed increases on the owner's turn, regardless of which piece
+ // was selected to shoot. Both perimeter walls and corner wedges count.
+ if(!isEnemy&&!world.preparation&&world.shotSerial>0){
+  const piece=a.static?b:b.static?a:null;
+  if(piece&&piece.ability==='ricochet'&&piece.owner===world.lastShooterOwner&&contactSpeed>45&&world.time-piece.wallBoostAt>=.18){
+   const incoming=piece===a?va:vb;
+   const entrySpeed=hypot(incoming.x,incoming.y),exitSpeed=hypot(piece.vx,piece.vy);
+   if(entrySpeed>45&&exitSpeed>1){
+    const goal=Math.min(1800,Math.max(exitSpeed,entrySpeed*RICOCHET_BOOST));
+    piece.vx*=goal/exitSpeed;piece.vy*=goal/exitSpeed;piece.wallBoostAt=world.time;
+    onImpact?.wallBoost?.({piece,p,speed:goal,step});
+   }
+  }
+ }
  // The collision happens normally before the splitting animation/spawn.
  // A split activates on contact during either player's turn, never in preparation.
  if(isEnemy&&!world.preparation&&contactSpeed>12){
@@ -243,7 +276,7 @@ function resolve(world,a,b,m,step,onImpact,attacker,splitRequests){
    splitRequests.push({piece:tile,hit:{x:p.x,y:p.y},normal:{x:n.x,y:n.y}});
   }
  }
- if(onImpact&&(contactSpeed>80||firstStrike||(attacker?.shockArmed&&attacker.id===world.shooterId)))onImpact({a,b,p,n,speed:contactSpeed,corner,impulse:impact,skill,firstStrike,step});
+ if(onImpact?.impact&&(contactSpeed>80||firstStrike||(attacker?.shockArmed&&attacker.id===world.shooterId)))onImpact.impact({a,b,p,n,speed:contactSpeed,corner,impulse:impact,skill,firstStrike,step});
 }
 function stepOnce(world,dt,hooks={}){
  const bodies=world.bodies,staticWalls=world.walls;world.time+=dt;
@@ -276,6 +309,17 @@ function stepOnce(world,dt,hooks={}){
    }
    b.homingLeft-=dt;
    if(b.homingLeft<=0)b.burstStage='done';
+  }
+  // Magnetic attraction applies only to the original enemy list captured at activation.
+  for(const mag of world.magnets){
+   const target=mag.targets.includes(b.id);
+   if(!target||b.owner===mag.owner)continue;
+   const dx=mag.center.x-b.x,dy=mag.center.y-b.y,dist=hypot(dx,dy);
+   if(dist<14)continue;
+   const desired=Math.min(680,Math.max(80,(dist-42)*4));
+   const k=Math.min(1,dt*8);
+   b.vx+=(dx/dist*desired-b.vx)*k;
+   b.vy+=(dy/dist*desired-b.vy)*k;
   }
   // Original Ver.1.2 vortex: only enemies in range at activation are captured.
   // No late entrants and no friendly fire from the vortex itself.
@@ -336,6 +380,10 @@ function stepOnce(world,dt,hooks={}){
   world.vortices[i].age+=dt;
   if(world.vortices[i].age>=world.vortices[i].duration)world.vortices.splice(i,1);
  }
+ for(let i=world.magnets.length-1;i>=0;i--){
+  world.magnets[i].age+=dt;
+  if(world.magnets[i].age>=world.magnets[i].duration)world.magnets.splice(i,1);
+ }
  const merges=[],splitRequests=[];
  for(let pass=0;pass<2;pass++){
   for(let i=0;i<bodies.length;i++){
@@ -348,14 +396,14 @@ function stepOnce(world,dt,hooks={}){
       a.merging=b.merging=true;merges.push([a,b]);break;
     }
     const attacker=a.id===world.shooterId?a:b.id===world.shooterId?b:null;
-    resolve(world,a,b,m,world.time,pass===0?hooks.impact:null,attacker,splitRequests);
+    resolve(world,a,b,m,world.time,pass===0?hooks:null,attacker,splitRequests);
    }
   }
   for(const a of bodies){if(!a.alive||a.merging||a.jump)continue;
    for(const wall of staticWalls){
     if(Math.abs(a.x-wall.x)>a.radius+wall.parts[0].w/2||Math.abs(a.y-wall.y)>a.radius+wall.parts[0].h/2)continue;
     const m=manifold(a,wall);
-    if(m)resolve(world,a,wall,m,world.time,pass===0?hooks.impact:null,a.id===world.shooterId?a:null,splitRequests);
+    if(m)resolve(world,a,wall,m,world.time,pass===0?hooks:null,a.id===world.shooterId?a:null,splitRequests);
    }
   }
  }
@@ -403,7 +451,7 @@ function step(world,dt,hooks={}){
 }
 function newWorld(){return {w:W,h:H,time:0,bodies:[],preparation:true,prepTurns:0,practiceSealed:false,shotSerial:0,splitUsedShot:-1,
  gateX:184,gateY:165,suddenDeath:false,suddenTurns:0,walls:walls(184,165,true),
- shocks:[],vortices:[],fields:[],awakenedOwners:new Set(),shooterId:null,lastShooterOwner:0,shotTime:0};}
+ shocks:[],vortices:[],magnets:[],fields:[],awakenedOwners:new Set(),shooterId:null,lastShooterOwner:0,shotTime:0};}
 function nearestEnemy(world,b){let nearest=null,best=Infinity;for(const p of world.bodies){if(!p.alive||p.owner===b.owner||p.id===b.id)continue;const d=hypot(p.x-b.x,p.y-b.y);if(d<best){best=d;nearest=p}}return nearest}
 function finishTurn(world,owner,allowAbility=true){
  // A field persists throughout the OPPONENT's entire next turn, never more.
@@ -491,6 +539,14 @@ function startVortex(world,b){
  const v={sourceId:b.id,owner:b.owner,center:{x:b.x,y:b.y},age:0,duration:2.3,expand:95,range,targets};
  world.vortices.push(v);return v;
 }
+function startMagnet(world,b){
+ if(world.preparation||!b||!b.alive||b.ability!=='magnet'||!b.magnetArmed||b.magnetTriggered)return null;
+ b.magnetArmed=false;b.magnetTriggered=true;
+ const targets=world.bodies.filter(p=>p.alive&&p.owner!==b.owner&&hypot(p.x-b.x,p.y-b.y)<=MAGNET_RANGE).map(p=>p.id);
+ if(!targets.length)return null;
+ const mag={sourceId:b.id,owner:b.owner,center:{x:b.x,y:b.y},range:MAGNET_RANGE,age:0,duration:MAGNET_DURATION,targets};
+ world.magnets.push(mag);return mag;
+}
 function spawnInitial(world,decks){
  // Side-by-side letters keep the board readable while giving each player achievable fusions.
  for(let owner=0;owner<2;owner++)for(let i=0;i<3;i++){
@@ -515,6 +571,7 @@ function fire(world,b,dx,dy,power,spin,spinStrength=1){
  b.homingLeft=0;b.burstFired=false;
  b.shockArmed=!world.preparation&&b.ability==='shock';
  b.vortexArmed=!world.preparation&&b.ability==='vortex';b.vortexTriggered=false;b.vortexHitEnemy=false;
+ b.magnetArmed=!world.preparation&&b.ability==='magnet';b.magnetTriggered=false;
  b.jump=null;b.strikeSpent=false;b.strikeFirstEnemyId=null;
  if(b.shockArmed){
   const from={x:b.x,y:b.y},landing=shockLanding(b,dx,dy,amount);
@@ -527,8 +584,8 @@ function fire(world,b,dx,dy,power,spin,spinStrength=1){
  world.shooterId=b.id;world.lastShooterOwner=b.owner;world.shotTime=world.time;
  return speed;
 }
-function settle(world){for(const b of world.bodies){b.vx=0;b.vy=0;b.omega=0;b.isLaunched=false;b.burstAge=null;b.burstStage=null;b.homingLeft=0;b.shockArmed=false;b.vortexArmed=false;b.vortexHitEnemy=false;b.jump=null;b.trail=[]}world.shocks.length=0;world.vortices.length=0;}
-function allStopped(world){return !world.shocks.length&&!world.vortices.length&&!world.bodies.some(b=>b.alive&&(b.burstStage==='coast'||b.burstStage==='homing'||b.jump))&&world.bodies.filter(b=>b.alive&&!b.merging).every(b=>hypot(b.vx,b.vy)<10&&Math.abs(b.omega)<.17)}
+function settle(world){for(const b of world.bodies){b.vx=0;b.vy=0;b.omega=0;b.isLaunched=false;b.burstAge=null;b.burstStage=null;b.homingLeft=0;b.shockArmed=false;b.vortexArmed=false;b.vortexHitEnemy=false;b.magnetArmed=false;b.jump=null;b.trail=[]}world.shocks.length=0;world.vortices.length=0;world.magnets.length=0;}
+function allStopped(world){return !world.shocks.length&&!world.vortices.length&&!world.magnets.length&&!world.bodies.some(b=>b.alive&&(b.burstStage==='coast'||b.burstStage==='homing'||b.jump))&&world.bodies.filter(b=>b.alive&&!b.merging).every(b=>hypot(b.vx,b.vy)<10&&Math.abs(b.omega)<.17)}
 function createMerged(world,a,b){
  const mass=a.mass+b.mass;
  const x=(a.x*a.mass+b.x*b.mass)/mass,y=(a.y*a.mass+b.y*b.mass)/mass;
@@ -660,12 +717,13 @@ function evaluateShot(world, shooter,dir,power,spin){
 // End-of-turn state serialization for online matches. All subsequent physics
 // runs from an authoritative snapshot. Never store transient trails or wall bodies.
 function packWorld(world){
- const bKeys=['id','text','word','owner','merged','ability','x','y','vx','vy','angle','omega','mass','invM','invI','w','h','radius','scale','growthStacks','lastGrowthTime','shotDir','burstAge','burstStage','homingLeft','burstFired','shockArmed','vortexArmed','vortexTriggered','strikeSpent','strikeFirstEnemyId','splitTier','attackFactor','splitLockUntil','splitQueued','awakened','awakenAt','alive','shotAt','isLaunched','vortexHitEnemy'];
+ const bKeys=['id','text','word','owner','merged','ability','x','y','vx','vy','angle','omega','mass','invM','invI','w','h','radius','scale','growthStacks','lastGrowthTime','shotDir','parts','burstAge','burstStage','homingLeft','burstFired','shockArmed','vortexArmed','vortexTriggered','strikeSpent','strikeFirstEnemyId','splitTier','attackFactor','splitLockUntil','splitQueued','awakened','awakenAt','alive','shotAt','isLaunched','vortexHitEnemy','wallBoostAt','reflectAt','magnetArmed','magnetTriggered'];
  return {
   time:world.time,preparation:world.preparation,prepTurns:world.prepTurns,shotSerial:world.shotSerial,splitUsedShot:world.splitUsedShot,
   gateX:world.gateX,gateY:world.gateY,suddenDeath:world.suddenDeath,suddenTurns:world.suddenTurns,
   shooterId:world.shooterId,lastShooterOwner:world.lastShooterOwner,shotTime:world.shotTime,
   awakenedOwners:[...world.awakenedOwners],fields:world.fields.map(f=>({...f})),
+  magnets:world.magnets.map(m=>({...m,center:{...m.center},targets:[...m.targets]})),
   bodies:world.bodies.filter(b=>b.alive).map(b=>{
    const obj={};for(const k of bKeys)if(b[k]!==undefined)obj[k]=b[k];return obj;
   })
@@ -684,14 +742,25 @@ function unpackWorld(snapshot){
   const b=body({x:raw.x,y:raw.y,text:raw.text,word:raw.word,owner:raw.owner,merged:raw.merged,angle:raw.angle});
   Object.assign(b,raw);
   const shape=shapeFor(b.text),scale=b.scale||1;
-  b.parts=shape.parts.map(part=>({x:part.x*scale,y:part.y*scale,w:part.w*scale,h:part.h*scale}));
+  // Cross-device font rasterization is not deterministic. Use the SHOOTER's
+  // geometry saved with the authoritative world instead of reconstructing
+  // the collision shape from the receiver's local system font.
+  const goodParts=Array.isArray(raw.parts)&&raw.parts.length>0&&raw.parts.length<=12
+   &&raw.parts.every(p=>p&&['x','y','w','h'].every(k=>Number.isFinite(p[k]))&&p.w>0&&p.h>0&&p.w<500&&p.h<500);
+  b.parts=goodParts?raw.parts.map(part=>Array.isArray(part.polygon)?{...part,polygon:part.polygon.map(pt=>({...pt}))}:{...part})
+   :shape.parts.map(part=>({x:part.x*scale,y:part.y*scale,w:part.w*scale,h:part.h*scale}));
   b.trail=[];b.trailTime=0;b.flash=0;b.merging=false;b.jump=null;
   return b;
  });
- idSeq=Math.max(idSeq,...w.bodies.map(b=>b.id+1),1);
+ // Reset to the canonical next ID; practice sessions on one device must not
+ // change future online merge/split IDs on that device.
+ idSeq=Math.max(1,...w.bodies.map(b=>b.id+1));
  w.walls=walls(w.gateX,w.gateY,w.preparation);
  w.shocks=[];w.vortices=[];
+ w.magnets=(Array.isArray(snapshot.magnets)&&snapshot.magnets.length<=4?snapshot.magnets:[])
+  .filter(m=>m&&Number.isFinite(m.age)&&Number.isFinite(m.duration)&&Number.isFinite(m.center?.x)&&Number.isFinite(m.center?.y)&&Array.isArray(m.targets)&&m.targets.length<=72)
+  .map(m=>({...m,center:{...m.center},targets:[...m.targets]}));
  return w;
 }
-global.KanjiPhysics={packWorld,unpackWorld,W,H,WORDS,PIECE_UNIT,FULL_SHOT_SPEED,NORMAL_FULL_IMPULSE,shockFullImpulse,attackMultiplier,SHOCK_JUMP_PIECES,SHOCK_RADIUS_PIECES,SHOCK_JUMP_SECONDS,shockJumpPieces,shockLanding,VORTEX_RADIUS_PIECES,SPLIT_SCALES,splitPiece,ABILITY_RULES,body,newWorld,spawnInitial,step,fire,settle,remaining,allStopped,createMerged,triggerShock,awakenPiece,shapeFor,manifold,evaluateShot,finishTurn,openArena,sealPracticeArena,expandGates,CORNER_SIZE,defenseFactor,fieldPosition,growGiant,startVortex,clamp};
+global.KanjiPhysics={packWorld,unpackWorld,W,H,WORDS,PIECE_UNIT,FULL_SHOT_SPEED,NORMAL_FULL_IMPULSE,shockFullImpulse,attackMultiplier,SHOCK_JUMP_PIECES,SHOCK_RADIUS_PIECES,SHOCK_JUMP_SECONDS,shockJumpPieces,shockLanding,VORTEX_RADIUS_PIECES,SPLIT_SCALES,splitPiece,ABILITY_RULES,body,newWorld,spawnInitial,step,fire,settle,remaining,allStopped,createMerged,triggerShock,awakenPiece,shapeFor,manifold,evaluateShot,finishTurn,openArena,sealPracticeArena,expandGates,CORNER_SIZE,defenseFactor,fieldPosition,growGiant,startVortex,startMagnet,MAGNET_RANGE,MAGNET_DURATION,RICOCHET_BOOST,REFLECT_MULTIPLIER,clamp};
 })(window);
