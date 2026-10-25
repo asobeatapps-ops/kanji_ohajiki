@@ -173,3 +173,16 @@
 
 /* Ver.2.3: corner-KO streak arena leaves its holes clean of decorative captions. */
 .game-scene.corner-ko .board-corner{display:none}
+
+/* Ver.2.4: streak-specific clean result, only the selected word and win count. */
+.result-scene.streak-result .result-eyebrow,
+.result-scene.streak-result .result-particles,
+.result-scene.streak-result .winner-name,
+.result-scene.streak-result .result-scoreboard,
+.result-scene.streak-result .result-decks{display:none!important}
+.result-scene.streak-result{display:flex;flex-direction:column;align-items:stretch;justify-content:center;padding:35px 23px;gap:16px}
+.result-scene.streak-result .result-headline{font-size:clamp(27px,8vw,42px);line-height:1.6;letter-spacing:.02em;margin:0 0 15px;white-space:pre-line;overflow-wrap:anywhere}
+.result-scene.streak-result .solid-btn{margin-top:5px}
+
+/* Four natural empty corner gaps without red fill, captions or decorative colors. */
+.game-scene.corner-ko .board-wrap{background:#26303a}

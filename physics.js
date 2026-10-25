@@ -1,4 +1,4 @@
-/* 漢字おはじき Ver.2.3: dependency-free 2D compound-SAT impulse solver.
+/* 漢字おはじき Ver.2.4: dependency-free 2D compound-SAT impulse solver.
    World units: board coordinates 540 x 760. Time: seconds. Clockwise rotation is positive.
    Runs physics at a fixed 1/120 second timestep in game.js, render separately.
 */
@@ -81,7 +81,7 @@ function staticRect(x,y,w,h){return {id:'wall',owner:-1,x,y,angle:0,vx:0,vy:0,om
 // Four small, solid corner wedges. The sloping 45-degree face is a REAL collision surface.
 const CORNER_SIZE=64;
 // Streak mode alone has four small triangular KO corners, with sealed mid-side gates.
-const STREAK_CORNER_SIZE=106;
+const STREAK_CORNER_SIZE=156;
 function staticTriangle(coords){
  const minX=Math.min(...coords.map(p=>p.x)),maxX=Math.max(...coords.map(p=>p.x));
  const minY=Math.min(...coords.map(p=>p.y)),maxY=Math.max(...coords.map(p=>p.y));
@@ -104,8 +104,28 @@ function streakWalls(){
  return [staticRect(W/2,-10,W-2*s,28),staticRect(W/2,H+10,W-2*s,28),
   staticRect(-10,H/2,28,H-2*s),staticRect(W+10,H/2,28,H-2*s)];
 }
+// The triangular opening is NOT itself an instant KO region. A kanji must
+// travel completely beyond the visible wood board before it counts as out.
+// Use its rotated bounding extent (not just the center) so the last visible
+// stroke is allowed to leave. Only the four corner exits can award a KO.
+function streakExtent(b){
+ const c=Math.abs(Math.cos(b.angle||0)),s=Math.abs(Math.sin(b.angle||0));
+ return {hx:Math.max(3,((b.w||0)*c+(b.h||0)*s)*.5),
+         hy:Math.max(3,((b.w||0)*s+(b.h||0)*c)*.5)};
+}
 function streakCornerMargin(b){
- return Math.min(b.x+b.y,(W-b.x)+b.y,b.x+(H-b.y),(W-b.x)+(H-b.y))-STREAK_CORNER_SIZE;
+ const {hx,hy}=streakExtent(b),s=STREAK_CORNER_SIZE,eps=2;
+ const ds=[];
+ // Completely off the TOP/BOTTOM edge through a corner opening.
+ if(b.x<=s-hx*.25||b.x>=W-s+hx*.25){
+  ds.push(b.y+hy+eps,H-b.y+hy+eps);
+ }
+ // Completely off the LEFT/RIGHT edge through a corner opening.
+ if(b.y<=s-hy*.25||b.y>=H-s+hy*.25){
+  ds.push(b.x+hx+eps,W-b.x+hx+eps);
+ }
+ // A piece in the board center is not outside, regardless of the diagonal.
+ return ds.length?Math.min(...ds):Infinity;
 }
 function inStreakCornerOut(b){return streakCornerMargin(b)<=0;}
 function walls(gx=184,gy=165,preparation=false){
@@ -497,9 +517,9 @@ function stepOnce(world,dt,hooks={}){
   if(b.y<py){b.y=py;b.vy=Math.abs(b.vy)*.55}
   if(b.y>H-py){b.y=H-py;b.vy=-Math.abs(b.vy)*.55}
  }
- // Streak KO: crossing a diagonal CORNER exit. Other modes still KO only
+ // Streak KO: the full kanji must exit beyond a CORNER edge. Other modes still KO only
  // beyond their existing side openings. In a single physics microstep two
- // pieces may cross at different fractions of dt: report real crossing order,
+ // pieces may leave at different fractions of dt: report real crossing order,
  // NOT the insertion order of bodies, for first-out win streak scoring.
  const outPieces=[];
  for(const b of bodies){if(!b.alive||b.merging||world.preparation)continue;

@@ -1,4 +1,4 @@
-/* 漢字おはじき Ver.2.3 | ASOBEAT — live-authoritative online sync */
+/* 漢字おはじき Ver.2.4 | ASOBEAT — live-authoritative online sync */
 (function(){'use strict';
 const P=window.KanjiPhysics;if(!P){document.body.textContent='物理エンジンを読み込めませんでした。';return;}
 const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'停止後1秒・敵を自動追尾','暴風':'引く強さで0.5〜3コマジャンプ・着地後に衝撃波','鉄壁':'ぶつかる攻撃を軽減（能力は普通に受ける）','渦巻':'停止後、半径約3.8コマ内の敵を2.3秒で2周','巨大':'命中で1.2倍巨大化（最大3回）','一撃':'最初の敵だけ3倍！角なら5倍！','分裂':'相手のターンに接触で分裂・1ターン1回','跳弾':'自ターンの壁衝突で加速（操作していなくても発動）','磁力':'停止後、渦巻と同じ範囲の敵だけを2秒間引き寄せ','反射':'相手ターンの衝突で0.7倍の力を反射'};
@@ -19,7 +19,7 @@ function categorizedSelect(select){
 }
 function groupLabel(word){const g=groupFor(word);const b=document.createElement('span');b.className='word-type type-'+g.key;b.textContent=g.name;return b}
 function updateGroupLabel(el,word){const g=groupFor(word);el.className='word-type type-'+g.key;el.textContent=g.name;}
-const $=id=>document.getElementById(id),ctx=$('board').getContext('2d',{alpha:false});
+const $=id=>document.getElementById(id),ctx=$('board').getContext('2d',{alpha:true});
 const {W,H}=P,PI=Math.PI,TAU=PI*2,clamp=P.clamp;
 const scenes=['home','streak','match','onlineDeck','setup','confirm','game','result'];
 const st={scene:'home',mode:'solo',diff:'normal',decks:[['暴走','暴風','鉄壁'],['暴風','鉄壁','暴走']],names:['青チーム','CPU'],world:null,phase:'title',turn:0,spin:1,drag:null,selected:null,fx:[],texts:[],bannerUntil:0,shake:0,flash:0,hitstop:0,time:0,acc:0,moving:0,still:0,shotCount:0,stats:{outs:[0,0],merges:[0,0],crits:[0,0],awakens:[0,0]},vortexPlayed:false,magnetPlayed:false,turnToken:0,sound:true,result:null,geom:null,streakWins:0,streakWord:'暴走',streakNextWord:null};
@@ -120,12 +120,22 @@ function buildStreakSelection(){const host=$('streakWordList');host.textContent=
 }
 function showStreakSetup(){cancelAsync();st.mode='streak';st.phase='setup';buildStreakSelection();changeScene('streak');}
 function restoreStreakPrefs(){if(st._streakBackup){st.diff=st._streakBackup.diff;st.decks=st._streakBackup.decks;st.names=st._streakBackup.names;st._streakBackup=null;}}
+function resetStreakInteraction(){
+ // Clear stale gesture state before reusing the same canvas for a new round.
+ const activePointer=st.drag&&!st.drag.cpu?st.drag.pointer:null;
+ if(activePointer!==null&&activePointer!==undefined){
+  try{if($('gameScene').hasPointerCapture(activePointer))$('gameScene').releasePointerCapture(activePointer)}catch(e){}
+ }
+ cancelHold();suppressAimUp=null;
+ st.selected=null;st.drag=null;st.cancelUntil=0;
+ $('aimHint').classList.add('hidden');closePieceInfo();
+}
 function startStreak(){
- cancelAsync();if(!st._streakBackup)st._streakBackup={diff:st.diff,decks:st.decks.map(d=>[...d]),names:[...st.names]};
- st.mode='streak';st.streakWins=0;st.streakWord=streakSelected;st.streakNextWord=null;
+ resetStreakInteraction();cancelAsync();if(!st._streakBackup)st._streakBackup={diff:st.diff,decks:st.decks.map(d=>[...d]),names:[...st.names]};
+ st.mode='streak';st.phase='playing';st.streakWins=0;st.streakWord=streakSelected;st.streakNextWord=null;
  st.names=['あなた','CPU'];st.decks=[[streakSelected],['暴走']];st.world=P.newWorld();P.setStreakArena(st.world);
  st.world.bodies=[P.body({x:W/2,y:H-178,word:streakSelected,text:streakSelected,owner:0,merged:true})];
- st.turn=0;st.shotCount=0;st.spin=1;st.acc=0;st.moving=0;st.still=0;st.selected=null;st.drag=null;
+ st.turn=0;st.shotCount=0;st.spin=1;st.acc=0;st.moving=0;st.still=0;st.selected=null;st.drag=null;st.cancelUntil=0;
  st.fx=[];st.texts=[];st.flash=0;st.shake=0;st.hitstop=0;st.vortexPlayed=false;st.magnetPlayed=false;
  st.stats=freshStats();st._impactTimes=new Map();st.result=null;st._streakPlayerOut=false;st._streakFirstOut=null;
  spawnStreakCpu();
@@ -148,15 +158,14 @@ function spawnStreakCpu(){
  P.settle(world);world.fields=[];world.shocks=[];world.vortices=[];world.magnets=[];world.shooterId=null;
  // Clear every round-local flag: without this, the next shot can be treated
  // as a continuation of the defeated round and become unselectable.
- st._streakPlayerOut=false;st._streakFirstOut=null;st.selected=null;st.drag=null;st.cancelUntil=0;
+ st._streakPlayerOut=false;st._streakFirstOut=null;resetStreakInteraction();
 }
 function streakDefeated(){
  $('streakCounter').classList.add('hidden');finishGame(1);
 }
 function streakWin(){
  if(st.phase==='streakAdvance'||st.phase==='result')return;
- st.streakWins++;st.phase='streakAdvance';st.selected=null;st.drag=null;
- cancelHold();suppressAimUp=null;
+ st.streakWins++;st.phase='streakAdvance';resetStreakInteraction();
  $('streakCounter').textContent=st.streakWins+'連勝中';
  $('streakCounter').classList.add('streak-announce');$('streakCounter').classList.remove('hidden');
  st.world.fields=[];P.settle(st.world);updateHud();sound('win');
@@ -254,11 +263,11 @@ function beginTurn(){if(st.phase==='result'||!st.world)return;st.phase='playing'
  const remote=st.mode==='online'&&st.turn!==online.slot;
  if(remote){$('phaseText').textContent='相手の操作を待っています';$('selectedLabel').textContent='相手のターン';$('hintLabel').textContent='相手が発射するまで待ちましょう';}
  if(st.mode==='streak'&&st.turn===0){
-  // Only one kanji starts each round. Select it automatically so that the
-  // next round is playable immediately, even without another tap.
-  st.selected=st.world.bodies.find(b=>b.alive&&b.owner===0)||null;
+  // Match normal play: the player must tap their kanji, then drag to fire.
+  // Never carry a selected body into a rematch or the next winning round.
+  st.selected=null;st.drag=null;
   $('selectedLabel').textContent='';
-  $('hintLabel').textContent=st.selected?'ドラッグして発射 ／ 長押しで能力を見る':'コマを復帰しています…';
+  $('hintLabel').textContent='自分の漢字をタップして選択 → ドラッグで発射';
  }
  for(const id of ['spinRight','spinLeft'])$(id).disabled=cpu||remote;
  updateHud();
@@ -459,21 +468,19 @@ function updateFieldStatus(){
 function finishGame(winner){cancelAsync();st.phase='result';st.result={winner,turns:st.shotCount,stats:JSON.parse(JSON.stringify(st.stats))};
  if(st.mode==='streak'){
   $('streakCounter').classList.add('hidden');st.result.streakWins=st.streakWins;
-  $('resultEyebrow').textContent='勝ち抜き戦 / RESULT';
-  $('resultHeadline').textContent=st.streakWins+'連勝しました。';
+  $('resultScene').classList.add('streak-result');
+  $('resultEyebrow').textContent='';
+  $('resultHeadline').textContent='『'+st.streakWord+'』で\n'+st.streakWins+'連勝しました。';
   $('resultHeadline').classList.remove('red');
-  $('winnerName').textContent='使用コマ：'+st.streakWord+' ／ おつかれさまでした！';
-  $('statTurns').textContent=st.shotCount;
-  $('statOuts').textContent=st.streakWins;
-  $('statMerges').textContent='―';$('statCrits').textContent=st.stats.crits.reduce((a,b)=>a+b,0);
-  $('statAwakens').textContent='―';
-  $('resultDecks').textContent='相手を'+st.streakWins+'回場外へ！ '+st.streakWord+'で挑戦しました。';
+  $('winnerName').textContent='';
+  $('resultDecks').textContent='';
   $('rematchBtn').textContent='もう一度挑戦する ↻';
-  const share='漢字おはじきの勝ち抜き戦で'+st.streakWins+'連勝しました！\n使用コマ：'+st.streakWord+'\n#漢字おはじき #ASOBEAT';
+  const share='漢字おはじき 勝ち抜き戦\n『'+st.streakWord+'』で'+st.streakWins+'連勝しました！\n#漢字おはじき';
   $('streakShareBtn').href='https://twitter.com/intent/tweet?text='+encodeURIComponent(share)+'&url='+encodeURIComponent('https://asobeatapps-ops.github.io/kanji_ohajiki/');
   $('streakShareBtn').classList.remove('hidden');
   changeScene('result');sound('win');return;
  }
+ $('resultScene').classList.remove('streak-result');
  $('streakShareBtn').classList.add('hidden');$('rematchBtn').textContent='もう一度戦う ↻';
  $('resultHeadline').classList.toggle('red',winner===1);
  $('resultHeadline').textContent=winner<0?'引き分け！':winner===0?'青の勝利！':'赤の勝利！';
@@ -623,22 +630,11 @@ function drawArenaGeometry(world=st.world,context=ctx){
   ctx.fillStyle='#fff2ca4d';ctx.fillRect(x+3,y+3,Math.max(0,w-6),Math.max(0,h-6));
  }
  if(world.cornerKnockout){
-  // Streak only: visibly filled side exits and four open triangular KO holes.
+  // Streak mode: four wide corner exits. Keep the plain wood background;
+  // the missing perimeter walls indicate openings. No KO text/colored wedges.
   const s=P.STREAK_CORNER_SIZE;
   segment(s,0,W-2*s,15);segment(s,H-15,W-2*s,15);
   segment(0,s,15,H-2*s);segment(W-15,s,15,H-2*s);
-  for(const [x,y,sx,sy] of [[0,0,1,1],[W,0,-1,1],[0,H,1,-1],[W,H,-1,-1]]){
-   ctx.save();ctx.translate(x,y);ctx.scale(sx,sy);
-   const grad=ctx.createLinearGradient(0,0,s,s);grad.addColorStop(0,'#171a25');grad.addColorStop(1,'#7c2530');
-   ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(s,0);ctx.lineTo(0,s);ctx.closePath();
-   ctx.fillStyle=grad;ctx.fill();
-   ctx.beginPath();ctx.moveTo(s,0);ctx.lineTo(0,s);ctx.strokeStyle='#ff9f6d';ctx.lineWidth=4;ctx.shadowColor='#fb6850';ctx.shadowBlur=9;ctx.stroke();ctx.shadowBlur=0;
-   ctx.restore();
-   // Keep the label upright on all four corners (never mirrored by the canvas flip).
-   ctx.save();ctx.font='900 17px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
-   ctx.fillStyle='#fff1d7';ctx.shadowColor='#0009';ctx.shadowBlur=3;
-   ctx.fillText('場外',x+sx*s*.32,y+sy*s*.34);ctx.restore();
-  }
   ctx.restore();return;
  }
  // Match the physical SAT triangles. They exist in ordinary arena modes.
@@ -787,11 +783,24 @@ function drawOverlays(){
  }
  for(const t of st.texts){const alpha=Math.max(0,1-t.t/t.life);ctx.save();ctx.globalAlpha=alpha;ctx.textAlign='center';ctx.font='1000 33px "Noto Sans CJK JP",sans-serif';ctx.lineWidth=7;ctx.lineJoin='round';ctx.strokeStyle='#242731';ctx.strokeText(t.str,clamp(t.x,110,W-110),clamp(t.y-t.t*75,50,H-35));ctx.fillStyle=t.color;ctx.fillText(t.str,clamp(t.x,110,W-110),clamp(t.y-t.t*75,50,H-35));ctx.restore()}
 }
+function cutStreakCornerOpenings(){
+ // Cut actual triangular gaps from the WOOD only. Pieces are painted AFTER
+ // this operation so they remain visible as they travel through the gaps;
+ // scoring waits until the last visible stroke leaves the canvas boundary.
+ const s=P.STREAK_CORNER_SIZE;
+ ctx.save();ctx.globalCompositeOperation='destination-out';
+ for(const [x,y,fx,fy] of [[0,0,1,1],[W,0,-1,1],[0,H,1,-1],[W,H,-1,-1]]){
+  ctx.save();ctx.translate(x,y);ctx.scale(fx,fy);
+  ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(s,0);ctx.lineTo(0,s);ctx.closePath();ctx.fill();ctx.restore();
+ }
+ ctx.restore();
+}
 function paint(dt){if(!st.world||st.scene!=='game')return;
  ctx.setTransform($('board').width/W,0,0,$('board').height/H,0,0);ctx.clearRect(0,0,W,H);
  ctx.save();if(st.shake>.1)ctx.translate((Math.random()-.5)*st.shake*1.2,(Math.random()-.5)*st.shake*1.2);
  ctx.drawImage(artCanvas,0,0,W,H);
- drawArenaGeometry();drawFields();drawVortices();drawMagnets();drawTrails(dt);
+ drawArenaGeometry();if(st.world.cornerKnockout)cutStreakCornerOpenings();
+ drawFields();drawVortices();drawMagnets();drawTrails(dt);
  for(const b of st.world.bodies)if(b.alive){drawPiece(b)}
  drawDrag();drawOverlays();
  if(st.flash>0){ctx.fillStyle=`rgba(255,250,214,${st.flash*.48})`;ctx.fillRect(0,0,W,H)}
@@ -1106,7 +1115,7 @@ $('quitBtn').addEventListener('click',()=>{
  onModal('<p><b>対戦を続けますか？</b></p><p>タイトルに戻ると、今の対戦は最初からになります。</p>','対戦メニュー',true);
 });
 $('modalEndMatch').addEventListener('click',()=>{if(st.mode==='online')leaveOnlineRoom();else{cancelAsync();if(st.mode==='streak')restoreStreakPrefs();st.phase='title';st.selected=null;st.drag=null;changeScene('home')}});
-$('rematchBtn').addEventListener('click',()=>{if(st.mode==='online'){requestOnlineRematch();return;}if(st.mode==='streak'){startStreak();return;}const bits=new Uint32Array(1);try{crypto.getRandomValues(bits)}catch(e){bits[0]=Math.floor(Math.random()*2)};startMatch(bits[0]%2)});
+$('rematchBtn').addEventListener('click',()=>{if(st.mode==='online'){requestOnlineRematch();return;}if(st.mode==='streak'){resetStreakInteraction();startStreak();return;}const bits=new Uint32Array(1);try{crypto.getRandomValues(bits)}catch(e){bits[0]=Math.floor(Math.random()*2)};startMatch(bits[0]%2)});
 $('resultHomeBtn').addEventListener('click',()=>{if(st.mode==='online')leaveOnlineRoom();else{cancelAsync();if(st.mode==='streak')restoreStreakPrefs();st.phase='title';changeScene('home')}});
 function abilityManualHTML(){
  const explanation='<div class="ability-definition"><b>攻撃</b>：漢字同士がぶつかって飛ばすこと。暴走で追いかけてぶつかった場合も攻撃です。'+
