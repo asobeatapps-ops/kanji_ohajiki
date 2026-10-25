@@ -1,4 +1,4 @@
-/* 漢字おはじき Ver.2.1 — authoritative shooter snapshots.
+/* 漢字おはじき Ver.2.2 — authoritative shooter snapshots.
    The shooter's physics is authoritative. During an active shot, lightweight
    periodic snapshots prevent cross-device font/physics drift. Turn-end state
    is committed in a Firestore transaction. Server-side game anti-cheat is NOT supplied. */
@@ -75,7 +75,7 @@ async function connect(code,name){
 function assertConnected(){if(!roomRef||!role||!playerUid)throw Error('合言葉の部屋へ接続していません');}
 const ownKey=(host,guest)=>role==='host'?host:guest;
 async function commitDeck(deck){
- assertConnected();if(!Array.isArray(deck)||deck.length!==3||!deck.every(w=>['暴走','爆風','鉄壁','渦巻','巨大','一撃','分裂','跳弾','磁力','反射'].includes(w)))throw Error('熟語を3つ選んでください');
+ assertConnected();if(!Array.isArray(deck)||deck.length!==3||!deck.every(w=>['暴走','暴風','鉄壁','渦巻','巨大','一撃','分裂','跳弾','磁力','反射'].includes(w)))throw Error('熟語を3つ選んでください');
  myDeck=[...deck];mySalt=randomId();
  try{sessionStorage.setItem('kanji-room-deck:'+roomId,JSON.stringify({uid:playerUid,deck:myDeck,salt:mySalt}))}catch(e){}
  const hash=await sha256(myDeck.join('|')+'::'+mySalt);
@@ -99,7 +99,7 @@ async function revealDeck(){
 async function verifyDecks(room){
  if(!room.hostReveal||!room.guestReveal)return false;
  for(const [reveal,key] of [[room.hostReveal,'hostCommit'],[room.guestReveal,'guestCommit']]){
-  const d=reveal.deck;if(!Array.isArray(d)||d.length!==3||d.some(w=>!['暴走','爆風','鉄壁','渦巻','巨大','一撃','分裂','跳弾','磁力','反射'].includes(w)))throw Error('相手のデッキ情報が不正です');
+  const d=reveal.deck;if(!Array.isArray(d)||d.length!==3||d.some(w=>!['暴走','暴風','鉄壁','渦巻','巨大','一撃','分裂','跳弾','磁力','反射'].includes(w)))throw Error('相手のデッキ情報が不正です');
   if(await sha256(d.join('|')+'::'+reveal.salt)!==room[key])throw Error('デッキの照合に失敗しました');
  }return true;
 }

@@ -144,3 +144,29 @@
 .piece-info button{position:absolute;right:9px;top:7px;border:none;border-radius:50%;height:30px;width:30px;
  background:#f2f7fb;color:#23475c;font-size:21px;font-weight:bold;cursor:pointer}
 .piece-info.hidden,.phase-announcement.hidden{display:none!important}
+
+/* Ver.2.2: categorized kanji picks and single-piece survivor mode */
+.action-streak{background:linear-gradient(110deg,#665190,#453b71);color:#fff;border:1px solid #ab9cce;box-shadow:0 7px 18px #33264e28}
+.action-streak small{color:#ddd1f2}
+.word-type{display:inline-flex;vertical-align:middle;align-items:center;justify-content:center;border-radius:100px;padding:4px 9px;font-size:10px;font-weight:900;letter-spacing:.02em;border:1px solid transparent}
+.type-attack{background:#fbe9e5;color:#ad4939;border-color:#eec6bf}
+.type-defense{background:#e5effa;color:#34669e;border-color:#bdd3eb}
+.type-balance{background:#e6f3e9;color:#37805b;border-color:#c3dfcb}
+.type-special{background:#f0e8fc;color:#7950a2;border-color:#dac5ef}
+.deck-slot .word-type{margin:2px 0 6px;align-self:flex-start}
+.streak-scene{padding:22px 18px 35px;overflow-y:auto}
+.streak-scene .form-card{padding:16px 14px;margin-top:19px}
+.streak-word-group{border-bottom:1px solid #e8e6e0;padding:14px 0 13px}
+.streak-word-group:last-child{border-bottom:0;padding-bottom:0}
+.streak-group-heading{display:flex;align-items:center;gap:9px;flex-wrap:wrap;color:#77838c;font-size:11px;font-weight:750;margin-bottom:10px}
+.streak-word-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.streak-word-button{font-size:20px;font-weight:1000;letter-spacing:1px;color:#344e60;border:2px solid #dbe0e3;border-radius:11px;background:white;min-height:51px;cursor:pointer}
+.streak-word-button.chosen{border-color:#377eae;color:#195d91;background:#eaf6ff;box-shadow:0 0 0 2px #74b8df35}
+.streak-word-info{font-size:12px;font-weight:800;color:#485d68;background:#f1f6f8;border:1px solid #dae7eb;border-radius:10px;padding:12px;min-height:38px}
+.streak-rule-note{font-size:12px;font-weight:800;text-align:center;margin:15px auto;color:#7d6989}
+.streak-counter{position:absolute;z-index:17;top:10px;left:50%;transform:translateX(-50%);pointer-events:none;min-width:95px;text-align:center;border-radius:100px;background:#17394fd8;color:#fff;padding:6px 14px;font-size:15px;font-weight:1000;white-space:nowrap;box-shadow:0 3px 15px #0003}
+.streak-counter.streak-announce{top:42%;font-size:clamp(32px,9vw,52px);padding:19px 26px;white-space:nowrap;background:#27294be8;color:#fff0ba;text-shadow:0 2px 5px #0006;border-radius:20px;animation:streakPop .28s cubic-bezier(.18,1.3,.3,1)}
+@keyframes streakPop{from{opacity:0;transform:translateX(-50%) scale(.5)}to{opacity:1;transform:translateX(-50%) scale(1)}}
+.streak-share{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:12px;text-decoration:none;background:#17202a;color:#fff}
+.streak-share.hidden{display:none}
+@media(max-width:390px){.streak-word-button{font-size:18px;min-height:46px}.streak-scene{padding:14px 12px 27px}.streak-word-options{gap:5px}}

@@ -1,4 +1,4 @@
-/* 漢字おはじき Ver.2.1: dependency-free 2D compound-SAT impulse solver.
+/* 漢字おはじき Ver.2.2: dependency-free 2D compound-SAT impulse solver.
    World units: board coordinates 540 x 760. Time: seconds. Clockwise rotation is positive.
    Runs physics at a fixed 1/120 second timestep in game.js, render separately.
 */
@@ -25,8 +25,8 @@ function shockLanding(b,dx,dy,power){
 const SHOCK_JUMP_SECONDS=.5;
 const ABILITY_RULES=[
  {word:'暴走',kind:'追いかける',timing:'止まったあと、いちばん近い相手へ走ります。ぶつかると普通の攻撃です。',numbers:'追いかけ：1秒／攻撃：1倍'},
- {word:'爆風',kind:'吹き飛ばす',timing:'矢印を長く引くほど遠くへジャンプ！ 着地した円の中の全員を外へ飛ばします。',numbers:'ジャンプ：最大3コマ（引く強さで細かく調整）／着地：0.5秒後／円：半径1コマ／威力100％'},
- {word:'鉄壁',kind:'守る',timing:'ぶつかる攻撃には強い！ でも爆風と渦巻では普通に動きます。',numbers:'自分が受ける攻撃：0.6倍／青・赤の円にいる味方：0.7倍／円の広さ：半径3コマ'},
+ {word:'暴風',kind:'吹き飛ばす',timing:'矢印を長く引くほど遠くへジャンプ！ 着地した円の中の全員を外へ飛ばします。',numbers:'ジャンプ：最大3コマ（引く強さで細かく調整）／着地：0.5秒後／円：半径1コマ／威力100％'},
+ {word:'鉄壁',kind:'守る',timing:'ぶつかる攻撃には強い！ でも暴風と渦巻では普通に動きます。',numbers:'自分が受ける攻撃：0.6倍／青・赤の円にいる味方：0.7倍／円の広さ：半径3コマ'},
  {word:'渦巻',kind:'敵を渦に巻き込む',timing:'発射して止まると発動。近くの敵だけが外へ広がる渦を2周します（敵への直撃は不要）。',numbers:'時間：2.3秒／2周／範囲：半径約3.8コマ（235）／外向きに拡大'},
  {word:'巨大',kind:'大きくなる',timing:'相手に当てるたび大きく、強くなります。最後まで元に戻りません。',numbers:'1回ごと：大きさ1.2倍・攻撃1.1倍／3回まで'},
  {word:'一撃',kind:'超強力な攻撃',timing:'最初にぶつかった敵1個だけを特大パワーで飛ばします。次の敵には普通の威力です。',numbers:'最初の敵：普通3倍／角なら合計5倍／2回目から通常'},
@@ -35,7 +35,7 @@ const ABILITY_RULES=[
  {word:'磁力',kind:'敵を引き寄せる',timing:'磁力コマを発射して停止した後、周囲の敵だけを自分の方向へ引き寄せます。味方は動きません。',numbers:'範囲：半径約3.8コマ（235）＝渦巻と同じ／吸引：2秒'},
  {word:'反射',kind:'攻撃を返す',timing:'相手のターン中に敵コマに衝突されると、その相手へ衝突の力の0.7倍を追加で返します。',numbers:'反射力：衝突インパルスの0.7倍／同一接触での連続発動を防止'}
 ];
-const WORDS={"暴走":{label:'暴走',ability:'burst'},"爆風":{label:'爆風',ability:'shock'},"鉄壁":{label:'鉄壁',ability:'iron'},"渦巻":{label:'渦巻',ability:'vortex'},"巨大":{label:'巨大',ability:'giant'},"一撃":{label:'一撃',ability:'strike'},"分裂":{label:'分裂',ability:'split'},"跳弾":{label:'跳弾',ability:'ricochet'},"磁力":{label:'磁力',ability:'magnet'},"反射":{label:'反射',ability:'reflect'}};
+const WORDS={"暴走":{label:'暴走',ability:'burst'},"暴風":{label:'暴風',ability:'shock'},"鉄壁":{label:'鉄壁',ability:'iron'},"渦巻":{label:'渦巻',ability:'vortex'},"巨大":{label:'巨大',ability:'giant'},"一撃":{label:'一撃',ability:'strike'},"分裂":{label:'分裂',ability:'split'},"跳弾":{label:'跳弾',ability:'ricochet'},"磁力":{label:'磁力',ability:'magnet'},"反射":{label:'反射',ability:'reflect'}};
 const mCan = document.createElement('canvas');mCan.width=300;mCan.height=110;
 const mCtx=mCan.getContext('2d',{willReadFrequently:true});
 const shapeCache=new Map();let idSeq=1;
@@ -111,6 +111,13 @@ function walls(gx=184,gy=165,preparation=false){
  ];
 }
 function openArena(world){world.preparation=false;world.walls=walls(world.gateX,world.gateY,false);world.fields.length=0}
+function setStreakArena(world){
+ // Use EXACTLY sudden-death expansion stage 2, without sudden-death UI or progression.
+ world.preparation=false;world.prepTurns=2;world.practiceSealed=false;
+ world.suddenDeath=true;world.gateX=184;world.gateY=165;world.suddenTurns=0;
+ expandGates(world);expandGates(world);
+ world.suddenDeath=false;world.fields.length=0;
+}
 function sealPracticeArena(world){
  // Ability effects remain ON while all four exits are completely sealed.
  world.preparation=false;world.practiceSealed=true;
@@ -801,5 +808,5 @@ function unpackWorld(snapshot){
   .map(m=>({...m,center:{...m.center},targets:[...m.targets]}));
  return w;
 }
-global.KanjiPhysics={packWorld,unpackWorld,W,H,WORDS,PIECE_UNIT,FULL_SHOT_SPEED,NORMAL_FULL_IMPULSE,shockFullImpulse,attackMultiplier,SHOCK_JUMP_PIECES,SHOCK_RADIUS_PIECES,SHOCK_JUMP_SECONDS,shockJumpPieces,shockLanding,VORTEX_RADIUS_PIECES,SPLIT_SCALES,splitPiece,ABILITY_RULES,body,newWorld,spawnInitial,step,fire,settle,remaining,allStopped,createMerged,triggerShock,awakenPiece,shapeFor,manifold,evaluateShot,finishTurn,openArena,sealPracticeArena,expandGates,CORNER_SIZE,defenseFactor,fieldPosition,growGiant,startVortex,startMagnet,MAGNET_RANGE,MAGNET_DURATION,RICOCHET_BOOST,REFLECT_MULTIPLIER,clamp};
+global.KanjiPhysics={packWorld,unpackWorld,W,H,WORDS,PIECE_UNIT,FULL_SHOT_SPEED,NORMAL_FULL_IMPULSE,shockFullImpulse,attackMultiplier,SHOCK_JUMP_PIECES,SHOCK_RADIUS_PIECES,SHOCK_JUMP_SECONDS,shockJumpPieces,shockLanding,VORTEX_RADIUS_PIECES,SPLIT_SCALES,splitPiece,ABILITY_RULES,body,newWorld,spawnInitial,step,fire,settle,remaining,allStopped,createMerged,triggerShock,awakenPiece,shapeFor,manifold,evaluateShot,finishTurn,openArena,sealPracticeArena,setStreakArena,expandGates,CORNER_SIZE,defenseFactor,fieldPosition,growGiant,startVortex,startMagnet,MAGNET_RANGE,MAGNET_DURATION,RICOCHET_BOOST,REFLECT_MULTIPLIER,clamp};
 })(window);

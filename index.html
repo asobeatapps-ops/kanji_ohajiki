@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
   <meta name="theme-color" content="#151f30">
   <meta name="description" content="漢字を弾いて、熟語に合体！角当てクリティカルで相手を場外へ。ASOBEATの無料対戦おはじきゲーム。">
-  <title>漢字おはじき Ver.2.1 | ASOBEAT</title>
-  <link rel="stylesheet" href="style.css?v=21">
-  <script defer src="physics.js?v=21"></script>
-  <script defer src="game.js?v=21"></script>
-  <script defer src="practice.js?v=21"></script>
-  <script type="module" src="online.js?v=21"></script>
+  <title>漢字おはじき Ver.2.2 | ASOBEAT</title>
+  <link rel="stylesheet" href="style.css?v=22">
+  <script defer src="physics.js?v=22"></script>
+  <script defer src="game.js?v=22"></script>
+  <script defer src="practice.js?v=22"></script>
+  <script type="module" src="online.js?v=22"></script>
 </head>
 <body>
 <div id="app">
@@ -33,11 +33,25 @@
     </div>
     <div class="home-actions">
       <button class="action action-main" id="soloBtn" type="button"><span class="btn-symbol">⚔</span><span><strong>ひとりで遊ぶ</strong><small>CPUと対戦 / 3段階の難易度</small></span><span class="btn-chevron">›</span></button>
+      <button class="action action-streak" id="streakBtn" type="button"><span class="btn-symbol">♛</span><span><strong>勝ち抜き戦</strong><small>漢字コマ1個で、CPU相手に何連勝できる？</small></span><span class="btn-chevron">›</span></button>
       <button class="action action-online" id="onlineBtn" type="button"><span class="btn-symbol">🌐</span><span><strong>友達とオンライン対戦</strong><small>合言葉でマッチング / 離れたスマホでもOK</small></span><span class="btn-chevron">›</span></button>
       <button class="action action-alt" id="localBtn" type="button"><span class="btn-symbol">◈</span><span><strong>同じ端末で2人対戦</strong><small>1台で交代しながら遊ぶ</small></span><span class="btn-chevron">›</span></button>
       <button class="ability-home-btn" id="abilityHomeBtn" type="button">✦ 熟語の能力と強さを見る <span>›</span></button>
       <div class="home-foot"><span>◆ 無料・アカウント登録不要</span></div>
     </div>
+  </main>
+
+  <main id="streakScene" class="scene streak-scene hidden">
+    <div class="scene-head"><button class="back-link" id="streakBack" type="button">‹ タイトルへ</button><span class="step-mark">SOLO / 勝ち抜き戦</span></div>
+    <h1 class="scene-title">勝ち抜き<span>戦。</span></h1>
+    <p class="section-note">完成済みの熟語コマを1つ選ぼう。<br>敵を場外へ落とすたび、次のCPUが登場。<br>あなたのコマが落ちたら終了！</p>
+    <div class="form-card">
+      <div class="card-top"><b>あなたの漢字コマ</b><small>好きな1個を選択</small></div>
+      <div id="streakWordList" class="streak-word-list" role="group" aria-label="使用する熟語コマ"></div>
+      <p id="streakWordInfo" class="streak-word-info"></p>
+    </div>
+    <div class="streak-rule-note">先攻：あなた ／ ステージ固定 ／ CPUのコマは毎戦ランダム</div>
+    <button id="streakStartBtn" class="solid-btn" type="button">この漢字で勝ち抜き戦を開始 <span>→</span></button>
   </main>
 
   <main id="matchScene" class="scene match-scene hidden">
@@ -56,8 +70,8 @@
       <div class="waiting-status"><span class="online-pulse"></span><div><b id="waitingHeadline">相手を待っています…</b><small id="waitingSub">友達に合言葉を伝えてください</small></div></div>
       <div class="practice-head"><b>本番ステージで試し打ち！</b><small>この練習は対戦に影響しません</small></div>
       <div class="practice-options" aria-label="練習する熟語の選択">
-        <label class="practice-select blue"><span>🔵 あなた</span><select id="practiceWord" aria-label="自分の完成済み熟語"><option>暴走</option><option>爆風</option><option>鉄壁</option><option>渦巻</option><option>巨大</option><option>一撃</option><option>分裂</option><option>跳弾</option><option>磁力</option><option>反射</option></select></label>
-        <label class="practice-select red"><span>🔴 CPU</span><select id="practiceOpponentWord" aria-label="CPUの完成済み熟語"><option>暴走</option><option>爆風</option><option>鉄壁</option><option>渦巻</option><option>巨大</option><option>一撃</option><option>分裂</option><option>跳弾</option><option>磁力</option><option>反射</option></select></label>
+        <label class="practice-select blue"><span>🔵 あなた</span><select id="practiceWord" aria-label="自分の完成済み熟語"><option>暴走</option><option>暴風</option><option>鉄壁</option><option>渦巻</option><option>巨大</option><option>一撃</option><option>分裂</option><option>跳弾</option><option>磁力</option><option>反射</option></select></label>
+        <label class="practice-select red"><span>🔴 CPU</span><select id="practiceOpponentWord" aria-label="CPUの完成済み熟語"><option>暴走</option><option>暴風</option><option>鉄壁</option><option>渦巻</option><option>巨大</option><option>一撃</option><option>分裂</option><option>跳弾</option><option>磁力</option><option>反射</option></select></label>
       </div>
       <div class="practice-tools"><span id="practiceTurn" class="practice-turn">先攻：あなた</span><span class="practice-blocked">四辺の場外は封鎖中</span><button id="practiceReset" type="button">↻ 最初から</button></div>
       <canvas id="practiceBoard" width="540" height="760" aria-label="本番と同じ漢字コマと盤面を使用する試し打ち。場外はすべて封鎖されています"></canvas>
@@ -126,6 +140,7 @@
       <div id="effectBanner" class="effect-banner hidden" aria-live="polite"></div>
       <div id="fieldStatus" class="field-status hidden" role="status" hidden></div>
       <div id="aimHint" class="aim-hint hidden" hidden></div>
+      <div id="streakCounter" class="streak-counter hidden" aria-live="polite"></div>
       <div id="phaseAnnouncement" class="phase-announcement hidden" role="status" aria-live="polite"></div>
       <div id="pieceInfo" class="piece-info hidden" role="status" aria-live="polite"><button type="button" id="pieceInfoClose" aria-label="説明を閉じる">×</button><strong id="pieceInfoTitle"></strong><p id="pieceInfoBody"></p></div>
       <div id="suddenOverlay" class="sudden-overlay hidden" role="alert" aria-hidden="true">
@@ -155,6 +170,7 @@
       <div class="result-metric awakening-metric"><b id="statAwakens">0</b><small>覚醒</small></div>
     </div>
     <div class="result-decks" id="resultDecks"></div>
+    <a id="streakShareBtn" class="solid-btn streak-share hidden" href="#" target="_blank" rel="noopener noreferrer">Xで連勝記録をポストする <span>↗</span></a>
     <button class="solid-btn" id="rematchBtn" type="button">もう一度戦う <span>↻</span></button>
     <button class="ghost-btn" id="resultHomeBtn" type="button">タイトルへ戻る</button>
   </main>
@@ -166,7 +182,7 @@
         <p><b>熟語合体</b>：暴＋走＝暴走など、対応する2文字を衝突させると合体。10種類の熟語と能力を選べます。</p>
         <p><b>攻撃</b>＝コマ同士の物理衝突（暴走の追尾中も攻撃）。<b>能力</b>＝衝撃波や渦巻による直接移動（鉄壁で軽減されない）。</p>
         <p><b>能力</b>：10種類の熟語の効果は「熟語の能力を見る」から確認できます。</p>
-        <p><b>準備フェーズ</b>：最初の2ターンは中央の壁と四辺の封鎖壁で自陣を守り、能力発動はありません（合体可能）。</p><p><b>覚醒・サドンデス</b>：残り1コマが未合体なら覚醒。両者1コマずつ、または12ターン目の開始時にサドンデス。以後1ターンごとに場外口が1コマ広がります。</p>
+        <p><b>準備フェーズ</b>：最初の2ターンは中央の壁と四辺の封鎖壁で自陣を守り、能力発動はありません（合体可能）。</p><p><b>覚醒・サドンデス</b>：残り1コマが未合体なら覚醒。両者1コマずつ、または16ターン目の開始時にサドンデス。以後1ターンごとに場外口が1コマ広がります。</p>
         <p><b>コツ</b>：↻↺で回転を選択。漢字の角を相手に当てると1.2倍のクリティカル！四辺中央の赤い開口部から相手を落とせば勝利。</p>
       </div>
       <button id="modalOK" class="solid-btn" type="button">対戦へ戻る <span aria-hidden="true">↩</span></button>
