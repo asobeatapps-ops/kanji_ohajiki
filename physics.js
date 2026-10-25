@@ -1,4 +1,4 @@
-/* 漢字おはじき Ver.2.0: dependency-free 2D compound-SAT impulse solver.
+/* 漢字おはじき Ver.2.1: dependency-free 2D compound-SAT impulse solver.
    World units: board coordinates 540 x 760. Time: seconds. Clockwise rotation is positive.
    Runs physics at a fixed 1/120 second timestep in game.js, render separately.
 */
@@ -13,7 +13,7 @@ const NORMAL_RESTITUTION=.73;
 const NORMAL_FULL_IMPULSE=(1+NORMAL_RESTITUTION)*FULL_SHOT_SPEED/2;
 const SHOCK_JUMP_PIECES=3, SHOCK_RADIUS_PIECES=1;
 const VORTEX_RADIUS_PIECES=235/PIECE_UNIT;
-const MAGNET_RANGE=235, MAGNET_DURATION=.9, RICOCHET_BOOST=1.27, REFLECT_MULTIPLIER=.7; // Original Ver.1.2 vortex: radius 235 units, enemy-only, two outward turns.
+const MAGNET_RANGE=235, MAGNET_DURATION=2, RICOCHET_BOOST=1.27, REFLECT_MULTIPLIER=.7; // Original Ver.1.2 vortex: radius 235 units, enemy-only, two outward turns.
 const SPLIT_SCALES=[1,2/3,1/3];
 // Aim strength changes jump distance smoothly: weak shots ≈0.5 tile, full = 3 tiles.
 function shockJumpPieces(power){return .5+2.5*Math.pow(clamp(power,0,1),1.1)}
@@ -32,7 +32,7 @@ const ABILITY_RULES=[
  {word:'一撃',kind:'超強力な攻撃',timing:'最初にぶつかった敵1個だけを特大パワーで飛ばします。次の敵には普通の威力です。',numbers:'最初の敵：普通3倍／角なら合計5倍／2回目から通常'},
  {word:'分裂',kind:'相手の攻撃で増える',timing:'相手のターンに敵コマと接触すると2個に分裂。自分のターンには発動しません。',numbers:'分裂は味方全体で1ターン1回。1個→2個（2/3サイズ）→最大4個（1/3サイズ）'},
  {word:'跳弾',kind:'壁で加速',timing:'自分のターン中に壁や四隅の障害物にぶつかると、反射した後の速度が上がります。跳弾を直接操作していなくても発動。',numbers:'反射後の速度：衝突前の約1.27倍／連続判定を防ぐため0.18秒間隔／速度上限1800'},
- {word:'磁力',kind:'敵を引き寄せる',timing:'磁力コマを発射して停止した後、周囲の敵だけを自分の方向へ引き寄せます。味方は動きません。',numbers:'範囲：半径約3.8コマ（235）＝渦巻と同じ／吸引：0.9秒'},
+ {word:'磁力',kind:'敵を引き寄せる',timing:'磁力コマを発射して停止した後、周囲の敵だけを自分の方向へ引き寄せます。味方は動きません。',numbers:'範囲：半径約3.8コマ（235）＝渦巻と同じ／吸引：2秒'},
  {word:'反射',kind:'攻撃を返す',timing:'相手のターン中に敵コマに衝突されると、その相手へ衝突の力の0.7倍を追加で返します。',numbers:'反射力：衝突インパルスの0.7倍／同一接触での連続発動を防止'}
 ];
 const WORDS={"暴走":{label:'暴走',ability:'burst'},"爆風":{label:'爆風',ability:'shock'},"鉄壁":{label:'鉄壁',ability:'iron'},"渦巻":{label:'渦巻',ability:'vortex'},"巨大":{label:'巨大',ability:'giant'},"一撃":{label:'一撃',ability:'strike'},"分裂":{label:'分裂',ability:'split'},"跳弾":{label:'跳弾',ability:'ricochet'},"磁力":{label:'磁力',ability:'magnet'},"反射":{label:'反射',ability:'reflect'}};
@@ -278,6 +278,34 @@ function resolve(world,a,b,m,step,onImpact,attacker,splitRequests){
  }
  if(onImpact?.impact&&(contactSpeed>80||firstStrike||(attacker?.shockArmed&&attacker.id===world.shooterId)))onImpact.impact({a,b,p,n,speed:contactSpeed,corner,impulse:impact,skill,firstStrike,step});
 }
+// Prevent fast split fragments from passing through a CLOSED side wall.
+// A fragment is allowed to leave normally through a genuine central gate.
+function guardFragmentEdges(world,b){
+ if(!b.alive||!b.splitTier)return;
+ const c=Math.abs(Math.cos(b.angle)),si=Math.abs(Math.sin(b.angle));
+ const hx=Math.max(3,(b.w*c+b.h*si)*.5),hy=Math.max(3,(b.w*si+b.h*c)*.5);
+ const openY=!world.preparation&&!world.practiceSealed&&Math.abs(b.y-H*.5)<world.gateY*.5-hy;
+ const openX=!world.preparation&&!world.practiceSealed&&Math.abs(b.x-W*.5)<world.gateX*.5-hx;
+ // Restore pieces that penetrated a solid section instead of awarding a false KO.
+ if(!openY&&b.x<hx+1){b.x=hx+1;b.vx=Math.abs(b.vx)*.62;}
+ if(!openY&&b.x>W-hx-1){b.x=W-hx-1;b.vx=-Math.abs(b.vx)*.62;}
+ if(!openX&&b.y<hy+1){b.y=hy+1;b.vy=Math.abs(b.vy)*.62;}
+ if(!openX&&b.y>H-hy-1){b.y=H-hy-1;b.vy=-Math.abs(b.vy)*.62;}
+}
+// Spawn fragments fully outside walls, including the four triangular corners.
+// This correction is done before the next physics tick, not after an out判定.
+function resolveFragmentSpawn(world,b){
+ guardFragmentEdges(world,b);
+ for(let i=0;i<9;i++){
+  let fixed=false;
+  for(const wall of world.walls){
+   const m=manifold(b,wall);if(!m)continue;
+   b.x-=m.n.x*(m.depth+1.3);b.y-=m.n.y*(m.depth+1.3);
+   guardFragmentEdges(world,b);fixed=true;
+  }
+  if(!fixed)break;
+ }
+}
 function stepOnce(world,dt,hooks={}){
  const bodies=world.bodies,staticWalls=world.walls;world.time+=dt;
  for(const b of bodies){if(!b.alive||b.merging)continue;
@@ -407,6 +435,9 @@ function stepOnce(world,dt,hooks={}){
    }
   }
  }
+ // A closed-wall collision can be skipped at very high speeds even with SAT.
+ // Clamp only small split fragments: actual central openings still award KOs.
+ for(const b of bodies)if(b.alive&&b.splitTier>0&&!b.jump)guardFragmentEdges(world,b);
  for(const [a,b] of merges){if(a.alive&&b.alive)hooks.merge?.(a,b)}
  // Execute spawns AFTER SAT passes so a new child is not hit during the same contact.
  for(const req of splitRequests){
@@ -445,7 +476,12 @@ function stepOnce(world,dt,hooks={}){
 }
 function step(world,dt,hooks={}){
  const fastest=world.bodies.reduce((high,b)=>b.alive?Math.max(high,hypot(b.vx,b.vy)):high,0);
- const subdivisions=Math.min(5,Math.max(1,Math.ceil(fastest*dt/16)));
+ // A 1/3-scale split tile can be thinner than an ordinary frame displacement.
+ // Use finer continuous-time samples when fragments exist, including very fast hits.
+ const hasFragments=world.bodies.some(b=>b.alive&&b.splitTier>0);
+ const minWidth=hasFragments?Math.min(...world.bodies.filter(b=>b.alive&&b.splitTier>0).map(b=>Math.min(b.w,b.h))):40;
+ const targetTravel=hasFragments?Math.max(4,Math.min(8,minWidth*.30)):16;
+ const subdivisions=Math.min(hasFragments?20:5,Math.max(1,Math.ceil(fastest*dt/targetTravel)));
  for(let i=0;i<subdivisions;i++)stepOnce(world,dt/subdivisions,hooks);
  return world;
 }
@@ -503,6 +539,9 @@ function splitPiece(world,parent,normal={x:1,y:0}){
   child.y=clamp(child.y,child.h*.48,H-child.h*.48);
   children.push(child);
  }
+ // Both newborn pieces must be separated from every solid wall BEFORE the
+ // current step ends; a split near the rim must not turn into an instant KO.
+ for(const child of children)resolveFragmentSpawn(world,child);
  parent.alive=false;parent.splitQueued=false;
  if(world.shooterId===parent.id)world.shooterId=children[0].id;
  world.bodies.push(...children);

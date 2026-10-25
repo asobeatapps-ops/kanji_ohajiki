@@ -1,4 +1,4 @@
-/* 漢字おはじき Ver.2.0 — authoritative shooter snapshots.
+/* 漢字おはじき Ver.2.1 — authoritative shooter snapshots.
    The shooter's physics is authoritative. During an active shot, lightweight
    periodic snapshots prevent cross-device font/physics drift. Turn-end state
    is committed in a Firestore transaction. Server-side game anti-cheat is NOT supplied. */

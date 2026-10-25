@@ -1,18 +1,58 @@
-/* 漢字おはじき Ver.2.0 | ASOBEAT — live-authoritative online sync */
+/* 漢字おはじき Ver.2.1 | ASOBEAT — live-authoritative online sync */
 (function(){'use strict';
 const P=window.KanjiPhysics;if(!P){document.body.textContent='物理エンジンを読み込めませんでした。';return;}
-const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'停止後1秒・敵を自動追尾','爆風':'引く強さで0.5〜3コマジャンプ・着地後に衝撃波','鉄壁':'ぶつかる攻撃を軽減（能力は普通に受ける）','渦巻':'停止後、半径約3.8コマ内の敵を2.3秒で2周','巨大':'命中で1.2倍巨大化（最大3回）','一撃':'最初の敵だけ3倍！角なら5倍！','分裂':'相手のターンに接触で分裂・1ターン1回','跳弾':'自ターンの壁衝突で加速（操作していなくても発動）','磁力':'停止後、渦巻と同じ範囲の敵だけを引き寄せ','反射':'相手ターンの衝突で0.7倍の力を反射'};
+const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'停止後1秒・敵を自動追尾','爆風':'引く強さで0.5〜3コマジャンプ・着地後に衝撃波','鉄壁':'ぶつかる攻撃を軽減（能力は普通に受ける）','渦巻':'停止後、半径約3.8コマ内の敵を2.3秒で2周','巨大':'命中で1.2倍巨大化（最大3回）','一撃':'最初の敵だけ3倍！角なら5倍！','分裂':'相手のターンに接触で分裂・1ターン1回','跳弾':'自ターンの壁衝突で加速（操作していなくても発動）','磁力':'停止後、渦巻と同じ範囲の敵だけを2秒間引き寄せ','反射':'相手ターンの衝突で0.7倍の力を反射'};
 const $=id=>document.getElementById(id),ctx=$('board').getContext('2d',{alpha:false});
 const {W,H}=P,PI=Math.PI,TAU=PI*2,clamp=P.clamp;
 const scenes=['home','match','onlineDeck','setup','confirm','game','result'];
 const st={scene:'home',mode:'solo',diff:'normal',decks:[['暴走','爆風','鉄壁'],['爆風','鉄壁','暴走']],names:['青チーム','CPU'],world:null,phase:'title',turn:0,spin:1,drag:null,selected:null,fx:[],texts:[],bannerUntil:0,shake:0,flash:0,hitstop:0,time:0,acc:0,moving:0,still:0,shotCount:0,stats:{outs:[0,0],merges:[0,0],crits:[0,0],awakens:[0,0]},vortexPlayed:false,magnetPlayed:false,turnToken:0,sound:true,result:null,geom:null};
 let audio=null,noiseBuffer=null,animLast=0,rafId=0;let timers=[];
+let phaseNoticeTimer=null,infoTimer=null,holdPiece=null,suppressAimUp=null;
 const online={active:false,role:null,uid:null,slot:null,round:0,seq:-1,seenMoveId:null,ownShotId:null,starting:false,revealing:false,publishing:false,resetting:false,committed:false,rematch:false,gameReady:false,pendingRoom:null,lastError:'',frameStep:0,frameSentAt:0,frameBusy:false,lastFrameStep:0,lastFrameId:null,shotSeq:-1,frameWarningAt:0,remoteBlend:null};
 let onlineDeck=['暴走','爆風','鉄壁'];
 try{let prior=JSON.parse(localStorage.getItem('asobeat_kanji_online_deck')||'null');if(Array.isArray(prior)&&prior.length===3&&prior.every(w=>WORDS.includes(w)||w==='衝撃'))onlineDeck=prior.map(w=>w==='衝撃'?'爆風':w)}catch{}
 
 function later(fn,ms){const token=st.turnToken;const id=setTimeout(()=>{timers=timers.filter(x=>x!==id);if(token===st.turnToken)fn()},ms);timers.push(id);return id}
-function cancelAsync(){st.turnToken++;for(const id of timers)clearTimeout(id);timers=[]}
+function cancelAsync(){st.turnToken++;for(const id of timers)clearTimeout(id);timers=[];
+ if(phaseNoticeTimer){clearTimeout(phaseNoticeTimer);phaseNoticeTimer=null;}
+ if(infoTimer){clearTimeout(infoTimer);infoTimer=null;}
+ if(holdPiece?.timer)clearTimeout(holdPiece.timer);
+ holdPiece=null;suppressAimUp=null;
+ $('phaseAnnouncement')?.classList.add('hidden');$('pieceInfo')?.classList.add('hidden');
+}
+function flashPhaseAnnouncement(message,duration=500,kind=''){
+ const el=$('phaseAnnouncement');if(phaseNoticeTimer)clearTimeout(phaseNoticeTimer);
+ el.textContent=message;el.className='phase-announcement '+kind;
+ phaseNoticeTimer=setTimeout(()=>{el.classList.add('hidden');phaseNoticeTimer=null;},duration);
+}
+function closePieceInfo(){if(infoTimer)clearTimeout(infoTimer);infoTimer=null;$('pieceInfo').classList.add('hidden');}
+function showPieceInfo(b){
+ if(!b?.alive)return;
+ const rule=P.ABILITY_RULES.find(a=>a.word===b.word);
+ const side=b.owner===0?'青':'赤';
+ $('pieceInfoTitle').textContent=`${side}チーム｜${b.text}${b.merged?'':'（未合体）'}`;
+ $('pieceInfoBody').textContent=b.merged
+  ? `${rule?.kind||'特殊能力'}：${rule?.timing||''}\n${rule?.numbers||''}`
+  : `「${b.word}」の漢字コマです。もう片方の漢字とぶつけると「${b.word}」に合体します。\n合体後：${rule?.kind||''}。${rule?.timing||''}`;
+ $('pieceInfo').classList.remove('hidden');
+ if(infoTimer)clearTimeout(infoTimer);
+ infoTimer=setTimeout(closePieceInfo,6500);
+}
+function findInspectable(pos){if(!st.world)return null;let closest=null,dist=Infinity;
+ for(const b of st.world.bodies){if(!b.alive)continue;
+  const d=Math.hypot(b.x-pos.x,b.y-pos.y),allowed=Math.max(b.w,b.h)*.68+16;
+  if(d<allowed&&d<dist){closest=b;dist=d;}
+ }return closest;
+}
+function cancelHold(){if(holdPiece?.timer)clearTimeout(holdPiece.timer);holdPiece=null;}
+function scheduleHold(e,b,pos){cancelHold();if(!b)return;
+ const id=e.pointerId;holdPiece={pointer:id,start:pos,timer:setTimeout(()=>{
+  if(holdPiece?.pointer!==id||st.scene!=='game')return;
+  holdPiece=null;suppressAimUp=id;
+  if(st.drag&&!st.drag.cpu&&st.drag.pointer===id){st.drag=null;try{if($('gameScene').hasPointerCapture(id))$('gameScene').releasePointerCapture(id)}catch(e){}}
+  showPieceInfo(b);
+ },580)};
+}
 function safeLoad(){try{return JSON.parse(localStorage.getItem('asobeat_kanji_v10')||'{}')}catch(e){return {}}}
 function save(){try{localStorage.setItem('asobeat_kanji_v10',JSON.stringify({names:st.names,decks:st.decks,diff:st.diff,sound:st.sound}))}catch(e){}}
 const saved=safeLoad();if(Array.isArray(saved.names)&&saved.names.length===2)st.names=saved.names.map(x=>String(x||'').slice(0,10));
@@ -104,7 +144,7 @@ function updateHud(){if(!st.world)return;
 function beginTurn(){if(st.phase==='result'||!st.world)return;st.phase='playing';st.selected=null;st.drag=null;st.spin=1;st.still=0;
  $('spinRight').classList.add('active');$('spinLeft').classList.remove('active');
  $('turnText').textContent=st.turn===0?'🔵 青の番':'🔴 赤の番';
- $('phaseText').textContent=st.world.preparation?`準備フェーズ ${st.world.prepTurns+1}/2 · 能力無効`:(st.world.suddenDeath?'⚠️ サドンデス！':st.mode==='solo'&&st.turn===1?'CPU思考中…':'漢字を弾こう');
+ $('phaseText').textContent=st.world.preparation?'':(st.world.suddenDeath?'サドンデス':st.mode==='solo'&&st.turn===1?'CPU思考中…':'漢字を弾こう');
  $('selectedLabel').textContent=st.mode==='solo'&&st.turn===1?'CPUが狙っています…':'① 漢字をタップして選択';
  $('hintLabel').textContent='② 好きな位置からドラッグ／2本指タップで中止';
  $('aimHint').classList.add('hidden');$('spinMeter').textContent='回転力 --';updateFieldStatus();
@@ -112,7 +152,12 @@ function beginTurn(){if(st.phase==='result'||!st.world)return;st.phase='playing'
  const remote=st.mode==='online'&&st.turn!==online.slot;
  if(remote){$('phaseText').textContent='相手の操作を待っています';$('selectedLabel').textContent='相手のターン';$('hintLabel').textContent='相手が発射するまで待ちましょう';}
  for(const id of ['spinRight','spinLeft'])$(id).disabled=cpu||remote;
- updateHud();if(cpu)later(cpuTakeTurn,550);
+ updateHud();
+ // Preparation is announced once for exactly 1 s, then only a half-second
+ // blue/red notice appears after every completed turn (also on both clients).
+ if(st.world.preparation&&st.shotCount===0)flashPhaseAnnouncement('準備フェーズ',1000,'prep');
+ else if(st.shotCount>0)flashPhaseAnnouncement(st.turn===0?'青のターン':'赤のターン',500,st.turn===0?'blue':'red');
+ if(cpu)later(cpuTakeTurn,st.world.preparation&&st.shotCount===0?1150:550);
 }
 function fireShot(b,dirX,dirY,power,spin,spinStrength=1,fromNetwork=false){
  if(st.mode==='online'&&!fromNetwork){
@@ -262,7 +307,8 @@ function finishShot(){
   }
  }
  st.turn=1-st.turn;
- if(!world.preparation&&!world.suddenDeath&&n0===1&&n1===1){
+ if(!world.preparation&&!world.suddenDeath&&((n0===1&&n1===1)||st.shotCount>=11)){
+  $('suddenReason').textContent=n0===1&&n1===1?'両者残り1コマ！ 決着をつけろ！':'12ターン目から開口部が広がる！';
   world.suddenDeath=true;st.phase='sudden';st.selected=null;st.drag=null;
   $('suddenOverlay').classList.remove('hidden');
   $('suddenOverlay').setAttribute('aria-hidden','false');sound('out');
@@ -277,12 +323,7 @@ function finishShot(){
 }
 
 function updateFieldStatus(){
- const el=$('fieldStatus');if(!el||!st.world)return;
- const w=st.world,fields=w.fields;
- if(w.preparation){el.className='field-status prep';el.textContent=`準備 ${w.prepTurns+1}/2｜場外・中央封鎖 / 能力OFF`;return;}
- if(fields.length){el.className='field-status '+(fields[0].owner===0?'blue':'red');el.textContent=(fields[0].owner===0?'🔵 青':'🔴 赤')+' 鉄壁護陣：味方への攻撃×0.7・能力×1.0 / 半径3コマ';return;}
- if(w.suddenDeath){el.className='field-status sudden';el.textContent=`⚠️ サドンデス：場外が毎ターン1コマ拡大（+${w.suddenTurns}）`;return;}
- el.className='field-status hidden';
+ const el=$('fieldStatus');if(el){el.className='field-status hidden';el.textContent='';}
 }
 
 function finishGame(winner){cancelAsync();st.phase='result';st.result={winner,turns:st.shotCount,stats:JSON.parse(JSON.stringify(st.stats))};
@@ -339,12 +380,12 @@ function findSelected(pos){if(!st.world)return null;let best=null,dist=Infinity;
  }return best;
 }
 function selectPiece(b){st.selected=b;st.drag=null;
- $('selectedLabel').textContent=b.merged?`『${b.text}』${b.ability==='giant'?' Lv'+b.growthStacks:b.ability==='split'&&b.splitTier?' '+(b.splitTier===1?'2/3':'1/3')+'サイズ':''} を選択`:`「${b.text}」を選択`;
- $('hintLabel').textContent='盤面の外からでもドラッグして発射！';
- $('aimHint').textContent=`${b.text} を選択中 · 好きな位置で逆方向に引っ張ろう`;
- $('aimHint').classList.remove('hidden');
+ $('selectedLabel').textContent=''; // selection is shown by brightened kanji, not a text banner
+ $('hintLabel').textContent='ドラッグで発射 ／ 長押しで能力を見る';
+ $('aimHint').classList.add('hidden');
  $('spinMeter').textContent='回転力：開始位置で変化';sound('tap');
 }
+
 // Spin is determined by the gap between the SELECTED piece and where the
 // NEXT drag gesture BEGINS, NOT by the distance to an inaccessible board edge.
 function aimSpinAt(body,start){return clamp(Math.hypot(start.x-body.x,start.y-body.y)/420,0,1)}
@@ -355,24 +396,31 @@ function startAim(e,b){initAudio();const pos=boardPoint(e);
  $('hintLabel').textContent=`回転力 ${Math.round(strength*100)}% ・逆へ引っ張ろう`;
  $('spinMeter').textContent=`↻↺ 回転力 ${Math.round(strength*100)}%`;
 }
-function pointerDown(e){if(Date.now()<(st.cancelUntil||0)||!selectable()||st.drag)return;
+function pointerDown(e){
+ if(st.scene!=='game')return;
  if(e.isPrimary===false||e.button!==undefined&&e.button!==0)return;
  if(e.target.closest('button,input,select,a'))return;
- const pos=boardPoint(e),onCanvas=e.target.id==='board';
+ const onCanvas=e.target.id==='board';
+ const pos=boardPoint(e),inspect=onCanvas?findInspectable(pos):null;
+ closePieceInfo();
+ if(onCanvas&&inspect)scheduleHold(e,inspect,pos);else cancelHold();
+ if(Date.now()<(st.cancelUntil||0)||!selectable()||st.drag)return;
  const candidate=onCanvas?findSelected(pos):null;
- // First tap a kanji to select. Tapping a different kanji switches selection.
  if(candidate&&candidate!==st.selected){e.preventDefault();initAudio();selectPiece(candidate);return;}
  if(!st.selected)return;
- // Next gesture can begin ANYWHERE in the game screen (even beyond the board).
  e.preventDefault();startAim(e,st.selected);
 }
-function pointerMove(e){if(!st.drag||st.drag.cpu||e.pointerId!==st.drag.pointer)return;
+function pointerMove(e){
+ if(holdPiece?.pointer===e.pointerId){const p=boardPoint(e);if(Math.hypot(p.x-holdPiece.start.x,p.y-holdPiece.start.y)>13)cancelHold();}
+ if(!st.drag||st.drag.cpu||e.pointerId!==st.drag.pointer)return;
  e.preventDefault();const pos=boardPoint(e),d=st.drag;
  d.current=pos;d.dx=d.start.x-pos.x;d.dy=d.start.y-pos.y;
  d.power=clamp(Math.hypot(d.dx,d.dy)/142,0,1);
  $('hintLabel').textContent=`発射 ${Math.round(d.power*100)}% ・回転 ${Math.round(d.spinStrength*100)}%`;
 }
-function pointerUp(e){if(!st.drag||st.drag.cpu||e.pointerId!==st.drag.pointer)return;
+function pointerUp(e){cancelHold();
+ if(suppressAimUp===e.pointerId){suppressAimUp=null;e.preventDefault();return;}
+ if(!st.drag||st.drag.cpu||e.pointerId!==st.drag.pointer)return;
  e.preventDefault();pointerMove(e);const d=st.drag;st.drag=null;
  if(Math.hypot(d.dx,d.dy)>13){
   if(!fireShot(d.body,d.dx,d.dy,d.power,st.spin,d.spinStrength)){
@@ -380,14 +428,14 @@ function pointerUp(e){if(!st.drag||st.drag.cpu||e.pointerId!==st.drag.pointer)re
   }
  }else{$('hintLabel').textContent='選択OK！ 好きな場所から大きくドラッグ';}
 }
-function pointerCancel(e){if(st.drag&&!st.drag.cpu&&(!e||e.pointerId===st.drag.pointer)){
+function pointerCancel(e){cancelHold();if(st.drag&&!st.drag.cpu&&(!e||e.pointerId===st.drag.pointer)){
  const pointer=st.drag.pointer;st.drag=null;
  try{if($('gameScene').hasPointerCapture(pointer))$('gameScene').releasePointerCapture(pointer)}catch(err){}
  $('hintLabel').textContent='キャンセルしました。好きな場所から再入力';
 }}
 function secondFingerCancel(e){
  if(!st.drag||st.drag.cpu||e.pointerType!=='touch'||e.pointerId===st.drag.pointer)return;
- e.preventDefault();st.cancelUntil=Date.now()+400;pointerCancel();
+ e.preventDefault();cancelHold();st.cancelUntil=Date.now()+400;pointerCancel();
  toast('2本指タップで発射をキャンセル');
 }
 
@@ -471,26 +519,16 @@ function drawPiece(b,context=ctx,selected=st.selected){const ctx=context;const c
   ctx.translate(0,-lift);ctx.scale(1+lift*.004,1+lift*.004);
  }
  ctx.rotate(b.angle);const scale=b.scale||1;ctx.scale(scale,scale);
- if(selected===b){
- ctx.save();ctx.strokeStyle=b.owner===0?'#2ba5e3':'#d96255';ctx.lineWidth=2;ctx.setLineDash([5,5]);ctx.globalAlpha=.85;
- ctx.beginPath();ctx.ellipse(0,0,b.w*.70+11,b.h*.70+11,0,0,TAU);ctx.stroke();ctx.restore();
- }
- if(b.ability==='shock'){ctx.strokeStyle=b.shockArmed?'#4bd8eabb':'#57c8d34f';ctx.lineWidth=2.8;ctx.beginPath();ctx.ellipse(0,0,b.w*.64+9,b.h*.7+9,0,0,TAU);ctx.stroke()}
- if(b.awakened){ctx.strokeStyle='#f3c05cb8';ctx.shadowColor='#edc361';ctx.shadowBlur=10;ctx.lineWidth=4;ctx.beginPath();ctx.ellipse(0,0,b.w*.64+9,b.h*.70+9,0,0,TAU);ctx.stroke();ctx.shadowBlur=0;}
-  if(b.ability==='burst'&&b.burstStage==='homing'){ctx.fillStyle='#ff613e33';ctx.beginPath();ctx.ellipse(0,0,b.w*.80,b.h*.75,0,0,TAU);ctx.fill()}
-  if(b.ability==='iron'){ctx.lineWidth=2;ctx.strokeStyle='#d1ab66cc';ctx.strokeRect(-b.w*.53/scale,-b.h*.57/scale,b.w*1.06/scale,b.h*1.14/scale)}
-  if(b.ability==='giant'){ctx.strokeStyle='#dcac39';ctx.lineWidth=2;ctx.strokeRect(-b.w*.52/scale,-b.h*.52/scale,b.w*1.04/scale,b.h*1.04/scale)}
-  if(b.ability==='vortex'){ctx.strokeStyle='#9875ca';ctx.lineWidth=2;ctx.beginPath();ctx.arc(0,0,Math.max(b.w,b.h)*.68/scale,0,TAU);ctx.stroke()}
-  if(b.ability==='ricochet'){ctx.strokeStyle='#efa93d';ctx.lineWidth=2.5/scale;ctx.strokeRect(-b.w*.54/scale,-b.h*.55/scale,b.w*1.08/scale,b.h*1.10/scale)}
-  if(b.ability==='magnet'){ctx.strokeStyle='#27bfa5';ctx.lineWidth=3/scale;ctx.beginPath();ctx.arc(0,0,Math.max(b.w,b.h)*.62/scale,0,TAU);ctx.stroke()}
-  if(b.ability==='reflect'){ctx.strokeStyle='#8ae2fb';ctx.lineWidth=2.8/scale;ctx.beginPath();ctx.arc(0,0,Math.max(b.w,b.h)*.60/scale,0,TAU);ctx.stroke()}
-  if(b.ability==='split'){ctx.strokeStyle=b.owner===0?'#6dc4ee':'#e993ac';ctx.lineWidth=2.5/scale;ctx.beginPath();ctx.arc(0,0,Math.max(b.w,b.h)*.53/scale,0,TAU);ctx.stroke()}
+ // Selection is indicated on the glyph itself, not a dotted circle or an
+ // always-on outline. Ability range circles appear only while abilities run.
  const shape=P.shapeFor(b.text),font=`1000 ${shape.fontSize}px "Noto Sans CJK JP","Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif`;
  ctx.font=font;ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineJoin='round';ctx.miterLimit=2;
  ctx.shadowColor='#3928215c';ctx.shadowOffsetX=3.5;ctx.shadowOffsetY=6;ctx.shadowBlur=4;ctx.lineWidth=7;ctx.strokeStyle='#f2e6d3';ctx.strokeText(b.text,0,shape.centerOffsetY);ctx.shadowColor='transparent';ctx.shadowOffsetY=0;ctx.shadowOffsetX=0;ctx.shadowBlur=0;
  ctx.lineWidth=5;ctx.strokeStyle=dark;ctx.strokeText(b.text,0,shape.centerOffsetY);
  ctx.lineWidth=2;ctx.strokeStyle=shine;ctx.strokeText(b.text,0,shape.centerOffsetY);
- ctx.fillStyle=color;ctx.fillText(b.text,0,shape.centerOffsetY);
+ ctx.fillStyle=selected===b?(b.owner===0?'#c7ecff':'#ffe0d9'):color;
+ if(selected===b){ctx.shadowColor='#ffffff';ctx.shadowBlur=17;}
+ ctx.fillText(b.text,0,shape.centerOffsetY);ctx.shadowBlur=0;
  if(b.flash>0){ctx.globalAlpha=b.flash*.6;ctx.fillStyle='#fff';ctx.fillText(b.text,0,shape.centerOffsetY)}
  ctx.restore();
  if(b.ability==='split'&&b.splitTier){
@@ -885,6 +923,8 @@ $('spinLeft').addEventListener('click',()=>{st.spin=-1;$('spinLeft').classList.a
 // Capturing at scene level preserves the drag if a finger crosses its edge.
 window.addEventListener('pointerdown',secondFingerCancel,{capture:true,passive:false});
 $('gameScene').addEventListener('pointerdown',pointerDown);
+$('board').addEventListener('contextmenu',e=>{e.preventDefault();const piece=findInspectable(boardPoint(e));if(piece)showPieceInfo(piece)});
+$('pieceInfoClose').addEventListener('click',closePieceInfo);
 $('gameScene').addEventListener('pointermove',pointerMove);
 $('gameScene').addEventListener('pointerup',pointerUp);
 $('gameScene').addEventListener('pointercancel',pointerCancel);
@@ -903,7 +943,7 @@ function abilityManualHTML(){
  return explanation+`<div class="ability-scroll"><table class="ability-table"><thead><tr><th>漢字</th><th>何が起こる？ どのくらい強い？</th></tr></thead><tbody>${rows}</tbody></table></div>`+
  '<p class="ability-extra"><b>角当て：</b>漢字の角を相手にぶつけると、普通は1.2倍。「一撃」は最初の敵だけ3倍、角なら合計5倍！</p>'+
  '<p class="ability-extra"><b>操作：</b>漢字をタップして選ぶ → 好きな場所から引っ張る → 指を離して発射。遠い位置から引き始めるほどよく回ります。もう片方の指でタップするとキャンセル。</p>'+
- '<p class="ability-extra"><b>試合の流れ：</b>最初の2ターンは準備時間で場外が閉じ、技もお休み。両チーム残り1コマになったら、毎ターン出口が広がります。</p>';
+ '<p class="ability-extra"><b>試合の流れ：</b>最初の2ターンは準備時間で場外が閉じ、技もお休み。両者1コマずつ、または12ターン目の開始時にサドンデスとなり、毎ターン出口が広がります。</p>';
 }
 function openAbilityManual(){onModal(abilityManualHTML(),'熟語の能力と強さ')}
 $('helpBtn').addEventListener('click',openAbilityManual);
