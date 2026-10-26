@@ -6,11 +6,11 @@
   <meta name="theme-color" content="#151f30">
   <meta name="description" content="漢字を弾いて、熟語に合体！角当てクリティカルで相手を場外へ。ASOBEATの無料対戦おはじきゲーム。">
   <title>漢字おはじき Ver.2.5 | ASOBEAT</title>
-  <link rel="stylesheet" href="style.css?v=25">
-  <script defer src="physics.js?v=25"></script>
-  <script defer src="game.js?v=25"></script>
-  <script defer src="practice.js?v=25"></script>
-  <script type="module" src="online.js?v=25"></script>
+  <link rel="stylesheet" href="style.css?v=26">
+  <script defer src="physics.js?v=26"></script>
+  <script defer src="game.js?v=26"></script>
+  <script defer src="practice.js?v=26"></script>
+  <script type="module" src="online.js?v=26"></script>
 </head>
 <body>
 <div id="app">
@@ -171,6 +171,19 @@
     </div>
     <div class="result-decks" id="resultDecks"></div>
     <a id="streakShareBtn" class="solid-btn streak-share hidden" href="#" target="_blank" rel="noopener noreferrer">Xで連勝記録をポストする <span>↗</span></a>
+    <section id="streakRankingPanel" class="streak-ranking hidden" aria-label="勝ち抜き戦の全国ランキング">
+      <div class="streak-ranking-top"><div><span class="ranking-eyebrow">ONLINE RANKING</span><h2>勝ち抜きランキング</h2></div><button id="streakRankReload" type="button" class="ranking-reload">更新 ↻</button></div>
+      <p class="ranking-note">名前・使用コマ・連勝数を表示。登録は任意です。</p>
+      <div id="streakRankStatus" class="ranking-status" role="status">ランキングを読み込んでいます…</div>
+      <ol id="streakRankList" class="ranking-list"></ol>
+      <button id="streakRankRegister" class="solid-btn ranking-register" type="button">ランキングに登録する <span>＋</span></button>
+      <form id="streakRankForm" class="ranking-form hidden">
+        <label for="streakRankName">ランキングに表示するユーザー名</label>
+        <input id="streakRankName" type="text" value="匿名" maxlength="12" autocomplete="nickname" placeholder="匿名" aria-label="ランキングのユーザー名">
+        <p>登録すると、ユーザー名・漢字コマ・連勝数が他のプレイヤーにも公開されます。</p>
+        <button id="streakRankSubmit" class="solid-btn" type="submit">この名前で登録する</button>
+      </form>
+    </section>
     <button class="solid-btn" id="rematchBtn" type="button">もう一度戦う <span>↻</span></button>
     <button class="ghost-btn" id="resultHomeBtn" type="button">タイトルへ戻る</button>
   </main>

@@ -13,7 +13,7 @@ const NORMAL_RESTITUTION=.73;
 const NORMAL_FULL_IMPULSE=(1+NORMAL_RESTITUTION)*FULL_SHOT_SPEED/2;
 const SHOCK_JUMP_PIECES=3, SHOCK_RADIUS_PIECES=1;
 const VORTEX_RADIUS_PIECES=235/PIECE_UNIT;
-const MAGNET_RANGE=235, MAGNET_DURATION=2, RICOCHET_BOOST=1.27, REFLECT_MULTIPLIER=.7; // Original Ver.1.2 vortex: radius 235 units, enemy-only, two outward turns.
+const MAGNET_RANGE=235, MAGNET_DURATION=2, RICOCHET_BOOST=1.27, REFLECT_MULTIPLIER=1.0; // Original Ver.1.2 vortex: radius 235 units, enemy-only, two outward turns.
 const SPLIT_SCALES=[1,2/3,1/3];
 // Aim strength changes jump distance smoothly: weak shots ≈0.5 tile, full = 3 tiles.
 function shockJumpPieces(power){return .5+2.5*Math.pow(clamp(power,0,1),1.1)}
@@ -24,16 +24,16 @@ function shockLanding(b,dx,dy,power){
 }
 const SHOCK_JUMP_SECONDS=.5;
 const ABILITY_RULES=[
- {word:'暴走',kind:'追いかける',timing:'止まったあと、いちばん近い相手へ走ります。ぶつかると普通の攻撃です。',numbers:'追いかけ：1秒／攻撃：1倍'},
- {word:'烈風',kind:'吹き飛ばす',timing:'矢印を長く引くほど遠くへジャンプ！ 着地した円の中の全員を外へ飛ばします。',numbers:'ジャンプ：最大3コマ（引く強さで細かく調整）／着地：0.5秒後／円：半径1コマ／威力100％'},
- {word:'鉄壁',kind:'守る',timing:'ぶつかる攻撃には強い！ でも烈風と渦巻では普通に動きます。',numbers:'自分が受ける攻撃：0.6倍／青・赤の円にいる味方：0.7倍／円の広さ：半径3コマ'},
- {word:'渦巻',kind:'敵を渦に巻き込む',timing:'発射して止まると発動。近くの敵だけが外へ広がる渦を2周します（敵への直撃は不要）。',numbers:'時間：2.3秒／2周／範囲：半径約3.8コマ（235）／外向きに拡大'},
- {word:'巨大',kind:'大きくなる',timing:'相手に当てるたび大きく、強くなります。最後まで元に戻りません。',numbers:'1回ごと：大きさ1.2倍・攻撃1.1倍／3回まで'},
- {word:'一撃',kind:'超強力な攻撃',timing:'最初にぶつかった敵1個だけを特大パワーで飛ばします。次の敵には普通の威力です。',numbers:'最初の敵：普通3倍／角なら合計5倍／2回目から通常'},
- {word:'分裂',kind:'相手の攻撃で増える',timing:'相手のターンに敵コマと接触すると2個に分裂。自分のターンには発動しません。',numbers:'分裂は味方全体で1ターン1回。1個→2個（2/3サイズ）→最大4個（1/3サイズ）'},
- {word:'跳弾',kind:'壁で加速',timing:'自分のターン中に壁や四隅の障害物にぶつかると、反射した後の速度が上がります。跳弾を直接操作していなくても発動。',numbers:'反射後の速度：衝突前の約1.27倍／連続判定を防ぐため0.18秒間隔／速度上限1800'},
- {word:'磁力',kind:'敵を引き寄せる',timing:'磁力コマを発射して停止した後、周囲の敵だけを自分の方向へ引き寄せます。味方は動きません。',numbers:'範囲：半径約3.8コマ（235）＝渦巻と同じ／吸引：2秒'},
- {word:'反射',kind:'攻撃を返す',timing:'相手のターン中に敵コマに衝突されると、その相手へ受けた衝撃の約7割を追加で跳ね返します。',numbers:'反撃：受けた衝撃の約7割を相手に返す／同一接触での連続発動を防止'}
+ {word:'暴走',kind:'追いかける',timing:'止まったあと、いちばん近い相手へ走ります。ぶつかると普通の攻撃です。',numbers:'追いかけ：1秒'},
+ {word:'烈風',kind:'吹き飛ばす',timing:'矢印を長く引くほど遠くへジャンプ！ 着地した円の中の全員を外へ飛ばします。',numbers:'ジャンプ：最大3コマ分／着地後半径1コマ分に攻撃'},
+ {word:'鉄壁',kind:'守る',timing:'ぶつかる攻撃には強い！ でも烈風と渦巻では普通に動きます。',numbers:'自分が受ける攻撃：0.6倍／円にいる味方：0.7倍／円の広さ：半径3コマ'},
+ {word:'渦巻',kind:'敵を渦に巻き込む',timing:'発射して止まると発動。近くの敵だけが外へ広がる渦を2周します（敵への直撃は不要）。',numbers:'時間：2.3秒／範囲：半径約3.8コマ／外向きに拡大'},
+ {word:'巨大',kind:'大きくなる',timing:'相手に当てるたび大きく、強くなります。最後まで元に戻りません。',numbers:'1回ごと：大きさ1.2倍・攻撃1.1倍／3回まで増加'},
+ {word:'一撃',kind:'超強力な攻撃',timing:'最初にぶつかった敵1個だけを特大パワーで飛ばします。次の敵には普通の威力です。',numbers:'最初の敵：通常の攻撃力3倍／クリティカルの場合は5倍／2回目から通常(1ターンリセット)'},
+ {word:'分裂',kind:'相手の攻撃で増える',timing:'相手のターンに敵コマと接触すると2個に分裂。自分のターンには発動しません。',numbers:'敵コマから攻撃があった場合、分裂する。分裂は1ターン1回。1個→2個（2/3サイズ）→最大4個（1/3サイズ）'},
+ {word:'跳弾',kind:'壁で加速',timing:'自分のターン中に壁や四隅の障害物にぶつかると、反射した後の速度が上がります。跳弾を直接操作していなくても発動。',numbers:'反射後の速度：壁への衝突前の1.27倍'},
+ {word:'磁力',kind:'敵を引き寄せる',timing:'磁力コマを発射して停止した後、周囲の敵だけを自分の方向へ引き寄せます。味方は動きません。',numbers:'範囲：半径約3.8コマ／吸引：2秒'},
+ {word:'反射',kind:'攻撃を返す',timing:'相手のターン中に敵コマに衝突されると、その相手へ受けた衝撃の10割を追加で跳ね返します。',numbers:'反撃：受けた衝撃の10割を相手に返す'}
 ];
 const WORDS={"暴走":{label:'暴走',ability:'burst'},"烈風":{label:'烈風',ability:'shock'},"鉄壁":{label:'鉄壁',ability:'iron'},"渦巻":{label:'渦巻',ability:'vortex'},"巨大":{label:'巨大',ability:'giant'},"一撃":{label:'一撃',ability:'strike'},"分裂":{label:'分裂',ability:'split'},"跳弾":{label:'跳弾',ability:'ricochet'},"磁力":{label:'磁力',ability:'magnet'},"反射":{label:'反射',ability:'reflect'}};
 const mCan = document.createElement('canvas');mCan.width=300;mCan.height=110;
@@ -275,7 +275,7 @@ function resolve(world,a,b,m,step,onImpact,attacker,splitRequests){
    applyImpulse(world,a,tangent.x*jt,tangent.y*jt,rA,-1,interaction);applyImpulse(world,b,tangent.x*jt,tangent.y*jt,rB,1,interaction)}
  }
  // Defensive reflection: ONLY on the opponent's turn and ONLY a physical
- // enemy-piece collision. Return an extra 70% of this contact's normal impulse
+ // enemy-piece collision. Return an extra 100% of this contact's normal impulse
  // to the opponent; do not deal this force to the reflecting tile itself.
  if(isEnemy&&!world.preparation&&world.shotSerial>0&&contactSpeed>12){
   for(const shield of [a,b]){
@@ -650,7 +650,6 @@ function startVortex(world,b){
  const range=235;
  const targets=world.bodies.filter(p=>p.alive&&p.owner!==b.owner&&hypot(p.x-b.x,p.y-b.y)<=range)
  .map(p=>({id:p.id,angle:Math.atan2(p.y-b.y,p.x-b.x),radius:Math.max(28,hypot(p.x-b.x,p.y-b.y))}));
- if(!targets.length)return null;
  const v={sourceId:b.id,owner:b.owner,center:{x:b.x,y:b.y},age:0,duration:2.3,expand:95,range,targets};
  world.vortices.push(v);return v;
 }
@@ -658,7 +657,6 @@ function startMagnet(world,b){
  if(world.preparation||!b||!b.alive||b.ability!=='magnet'||!b.magnetArmed||b.magnetTriggered)return null;
  b.magnetArmed=false;b.magnetTriggered=true;
  const targets=world.bodies.filter(p=>p.alive&&p.owner!==b.owner&&hypot(p.x-b.x,p.y-b.y)<=MAGNET_RANGE).map(p=>p.id);
- if(!targets.length)return null;
  const mag={sourceId:b.id,owner:b.owner,center:{x:b.x,y:b.y},range:MAGNET_RANGE,age:0,duration:MAGNET_DURATION,targets};
  world.magnets.push(mag);return mag;
 }

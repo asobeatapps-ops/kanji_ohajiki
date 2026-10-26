@@ -1,7 +1,7 @@
 /* 漢字おはじき Ver.2.4 | ASOBEAT — live-authoritative online sync */
 (function(){'use strict';
 const P=window.KanjiPhysics;if(!P){document.body.textContent='物理エンジンを読み込めませんでした。';return;}
-const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'停止後1秒・敵を自動追尾','烈風':'引く強さで0.5〜3コマジャンプ・着地後に衝撃波','鉄壁':'ぶつかる攻撃を軽減（能力は普通に受ける）','渦巻':'停止後、半径約3.8コマ内の敵を2.3秒で2周','巨大':'命中で1.2倍巨大化（最大3回）','一撃':'最初の敵だけ3倍！角なら5倍！','分裂':'相手のターンに接触で分裂・1ターン1回','跳弾':'自ターンの壁衝突で加速（操作していなくても発動）','磁力':'停止後、渦巻と同じ範囲の敵だけを2秒間引き寄せ','反射':'敵がぶつかったら、衝撃の約7割を相手に返す'};
+const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'停止後1秒・敵を自動追尾','烈風':'引く強さで0.5〜3コマジャンプ・着地後に衝撃波','鉄壁':'ぶつかる攻撃を軽減（能力は普通に受ける）','渦巻':'停止後、半径約3.8コマ内の敵を2.3秒で2周','巨大':'命中で1.2倍巨大化（最大3回）','一撃':'最初の敵だけ3倍！角なら5倍！','分裂':'相手のターンに接触で分裂・1ターン1回','跳弾':'自ターンの壁衝突で加速（操作していなくても発動）','磁力':'停止後、渦巻と同じ範囲の敵だけを2秒間引き寄せ','反射':'敵がぶつかったら、受けた衝撃の100%を相手に返す'};
 const WORD_GROUPS=[
  {name:'アタック型',key:'attack',words:['暴走','一撃','跳弾'],description:'攻めと場外KOを狙う'},
  {name:'ディフェンス型',key:'defense',words:['鉄壁','磁力'],description:'守りながら相手を崩す'},
@@ -311,7 +311,7 @@ function fireShot(b,dirX,dirY,power,spin,spinStrength=1,fromNetwork=false){
 }
 function collisionHooks(){return {
  wallBoost:({piece,p})=>{addParticles(p.x,p.y,22,'#ffc95c',1.0);showText('跳弾 加速!',piece.x,piece.y,'#ffe6a1');sound('crit');},
- reflect:({shield,intruder,p})=>{addRing(shield.x,shield.y,'#a9f3fd',shield.radius*1.3);showText('反射！ 衝撃を返す',p.x,p.y,'#aefaff');sound('crit');},
+ reflect:({shield,intruder,p})=>{addRing(shield.x,shield.y,'#a9f3fd',shield.radius*1.3);showText('反射！ 衝撃100%を返す',p.x,p.y,'#aefaff');sound('crit');},
  impact:({a,b,p,speed,corner,impulse,skill,firstStrike})=>{
   const shooter=(a.id===st.world.shooterId?a:b.id===st.world.shooterId?b:null);
   // Collisions may generate adjacent contact manifolds: one SFX per pair / 120 ms.
@@ -474,12 +474,16 @@ function finishGame(winner){cancelAsync();st.phase='result';st.result={winner,tu
   $('resultHeadline').classList.remove('red');
   $('winnerName').textContent='';
   $('resultDecks').textContent='';
-  $('rematchBtn').textContent='もう一度挑戦する ↻';
+  $('rematchBtn').textContent='コマ選択に戻る ←';
   const share='漢字おはじき 勝ち抜き戦\n『'+st.streakWord+'』で'+st.streakWins+'連勝しました！\n#漢字おはじき';
   $('streakShareBtn').href='https://twitter.com/intent/tweet?text='+encodeURIComponent(share)+'&url='+encodeURIComponent('https://asobeatapps-ops.github.io/kanji_ohajiki/');
   $('streakShareBtn').classList.remove('hidden');
-  changeScene('result');sound('win');return;
+  $('streakRankingPanel').classList.remove('hidden');
+  $('streakRankForm').classList.add('hidden');
+  $('streakRankRegister').disabled=false;
+  changeScene('result');sound('win');loadStreakRanking();return;
  }
+ $('streakRankingPanel').classList.add('hidden');
  $('resultScene').classList.remove('streak-result');
  $('streakShareBtn').classList.add('hidden');$('rematchBtn').textContent='もう一度戦う ↻';
  $('resultHeadline').classList.toggle('red',winner===1);
@@ -495,6 +499,47 @@ function finishGame(winner){cancelAsync();st.phase='result';st.result={winner,tu
   const item=document.createElement('p');item.textContent=`${i===0?'🔵':'🔴'} ${st.names[i]}　${st.decks[i].join(' / ')}　｜ KO ${st.stats.outs[i]} / 合体 ${st.stats.merges[i]} / CRITICAL ${st.stats.crits[i]} / 覚醒 ${st.stats.awakens[i]}`;$('resultDecks').appendChild(item)
  }
  changeScene('result');sound('win');
+}
+
+// Ranking is displayed as soon as a streak ends, but is saved only with explicit consent.
+let rankViewSerial=0,rankSubmitting=false;
+async function loadStreakRanking(){
+ const serial=++rankViewSerial,list=$('streakRankList'),status=$('streakRankStatus');
+ list.replaceChildren();status.textContent='ランキングを読み込んでいます…';
+ const net=window.KanjiOnline;
+ if(!net?.getStreakRanks){status.textContent='通信機能を読み込めませんでした。ネット接続を確認して更新してください。';return;}
+ try{
+  const rows=await net.getStreakRanks();
+  if(serial!==rankViewSerial||st.scene!=='result'||st.mode!=='streak')return;
+  status.textContent=rows.length?'全国トップ'+rows.length+'件':'まだ登録がありません。最初の記録を登録できます！';
+  rows.forEach((r,i)=>{
+   const li=document.createElement('li');
+   for(const [cls,text] of [['ranking-position',String(i+1)],['ranking-name',r.name],['ranking-word',r.word],['ranking-score',r.wins+'連勝']]){
+    const span=document.createElement('span');span.className=cls;span.textContent=text;li.appendChild(span);
+   }list.appendChild(li);
+  });
+ }catch(e){if(serial!==rankViewSerial)return;status.textContent='ランキングを取得できませんでした：'+networkError(e);}
+}
+function openStreakRankForm(){
+ if(st.scene!=='result'||st.mode!=='streak')return;
+ $('streakRankForm').classList.remove('hidden');
+ $('streakRankName').value='匿名';
+ $('streakRankName').focus();
+}
+async function submitStreakRank(event){
+ event.preventDefault();if(rankSubmitting||st.scene!=='result'||st.mode!=='streak'||!st.result)return;
+ rankSubmitting=true;const btn=$('streakRankSubmit');btn.disabled=true;btn.textContent='登録しています…';
+ try{
+  const net=window.KanjiOnline;if(!net?.registerStreakRank)throw Error('Firebaseが読み込まれていません。');
+  const result=await net.registerStreakRank($('streakRankName').value,st.streakWord,st.result.streakWins);
+  const message=result.saved?'ランキングに登録しました！':`以前の自己ベスト（${result.best}連勝）を保持しています。`;
+  $('streakRankForm').classList.add('hidden');$('streakRankRegister').disabled=true;
+  await loadStreakRanking();
+  if($('streakRankStatus').textContent.startsWith('全国トップ')||$('streakRankStatus').textContent.startsWith('まだ登録')){
+   $('streakRankStatus').textContent=message+' '+$('streakRankStatus').textContent;
+  }
+ }catch(e){$('streakRankStatus').textContent='登録できませんでした：'+networkError(e)}
+ finally{rankSubmitting=false;btn.disabled=false;btn.textContent='この名前で登録する';}
 }
 function cpuTakeTurn(){if(!st.world||st.phase!=='playing'||st.turn!==1||(st.mode!=='solo'&&st.mode!=='streak'))return;
  const diff=st.mode==='streak'?'normal':st.diff;
@@ -1156,7 +1201,10 @@ $('quitBtn').addEventListener('click',()=>{
  onModal('<p><b>対戦を続けますか？</b></p><p>タイトルに戻ると、今の対戦は最初からになります。</p>','対戦メニュー',true);
 });
 $('modalEndMatch').addEventListener('click',()=>{if(st.mode==='online')leaveOnlineRoom();else{cancelAsync();if(st.mode==='streak')restoreStreakPrefs();st.phase='title';st.selected=null;st.drag=null;changeScene('home')}});
-$('rematchBtn').addEventListener('click',()=>{if(st.mode==='online'){requestOnlineRematch();return;}if(st.mode==='streak'){resetStreakInteraction();startStreak();return;}const bits=new Uint32Array(1);try{crypto.getRandomValues(bits)}catch(e){bits[0]=Math.floor(Math.random()*2)};startMatch(bits[0]%2)});
+$('streakRankReload').addEventListener('click',loadStreakRanking);
+$('streakRankRegister').addEventListener('click',openStreakRankForm);
+$('streakRankForm').addEventListener('submit',submitStreakRank);
+$('rematchBtn').addEventListener('click',()=>{if(st.mode==='online'){requestOnlineRematch();return;}if(st.mode==='streak'){resetStreakInteraction();showStreakSetup();return;}const bits=new Uint32Array(1);try{crypto.getRandomValues(bits)}catch(e){bits[0]=Math.floor(Math.random()*2)};startMatch(bits[0]%2)});
 $('resultHomeBtn').addEventListener('click',()=>{if(st.mode==='online')leaveOnlineRoom();else{cancelAsync();if(st.mode==='streak')restoreStreakPrefs();st.phase='title';changeScene('home')}});
 function abilityManualHTML(){
  const explanation='<div class="ability-definition"><b>攻撃</b>：漢字同士がぶつかって飛ばすこと。暴走で追いかけてぶつかった場合も攻撃です。'+
@@ -1225,7 +1273,7 @@ function createPracticeEffects(worldGetter){
    }else if(speed>165){sound('impact',speed/300);if(speed>420)v.hitstop=Math.max(v.hitstop,.022)}
   },
   wallBoost:({piece,p})=>{particles(p.x,p.y,22,'#ffc95c',1);label('跳弾 加速!',piece.x,piece.y,'#ffe6a1');sound('crit')},
-  reflect:({shield,p})=>{ring(shield.x,shield.y,'#a9f3fd',shield.radius*1.3);label('反射！ 衝撃を返す',p.x,p.y,'#aefaff');sound('crit')},
+  reflect:({shield,p})=>{ring(shield.x,shield.y,'#a9f3fd',shield.radius*1.3);label('反射！ 衝撃100%を返す',p.x,p.y,'#aefaff');sound('crit')},
   split:(parent,children)=>{ring(parent.x,parent.y,parent.owner===0?'#63bafb':'#ec7d82',parent.radius*1.5);
    particles(parent.x,parent.y,25,parent.owner===0?'#6bcfff':'#ff98a0',1.3);v.shake=Math.max(v.shake,4);v.flash=Math.max(v.flash,.16);
    label('分裂！×2',parent.x,parent.y,'#ffe4a1');sound('merge')},

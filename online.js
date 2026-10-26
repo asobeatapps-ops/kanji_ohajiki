@@ -4,7 +4,7 @@
    is committed in a Firestore transaction. Server-side game anti-cheat is NOT supplied. */
 import {initializeApp} from 'https://www.gstatic.com/firebasejs/12.11.0/firebase-app.js';
 import {getAuth,signInAnonymously} from 'https://www.gstatic.com/firebasejs/12.11.0/firebase-auth.js';
-import {getFirestore,doc,runTransaction,onSnapshot,updateDoc,serverTimestamp} from 'https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js';
+import {getFirestore,doc,runTransaction,onSnapshot,updateDoc,serverTimestamp,collection,query,orderBy,limit,getDocs} from 'https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js';
 
 const firebaseConfig={
  apiKey:'AIzaSyCSZTyGQsnC5suS7N0FjjDWzrigad7_9KE',
@@ -161,6 +161,28 @@ async function leave(){
  })}catch(e){/* Caller can still exit locally if offline. */}}
  unsub?.();unsub=null;roomRef=null;roomId=null;role=null;latest=null;latestMeta={};myDeck=null;mySalt=null;
 }
-window.KanjiOnline={setListener,connect,commitDeck,revealDeck,verifyDecks,startRound,sendShot,pushFrame,finishShot,offerRematch,resetRematch,leave,
+
+// 勝ち抜き戦ランキング。匿名認証のUIDごとに自己ベスト1件を保管。
+const STREAK_WORDS=['暴走','烈風','鉄壁','渦巻','巨大','一撃','分裂','跳弾','磁力','反射'];
+async function getStreakRanks(){
+ await initAuth();
+ const q=query(collection(db,'streakRanks'),orderBy('wins','desc'),limit(30));
+ const snap=await getDocs(q);
+ return snap.docs.map(d=>({name:String(d.data().name||'匿名').slice(0,12),word:String(d.data().word||''),wins:Number(d.data().wins)||0}));
+}
+async function registerStreakRank(name,word,wins){
+ const uid=await initAuth();
+ const nick=String(name||'').trim().slice(0,12)||'匿名';
+ if(!STREAK_WORDS.includes(word)||!Number.isInteger(wins)||wins<0||wins>9999)throw Error('ランキングの記録が不正です。');
+ const ref=doc(db,'streakRanks',uid);
+ return runTransaction(db,async tx=>{
+  const snap=await tx.get(ref);const prev=snap.exists()?snap.data():null;
+  if(prev&&prev.wins>wins)return {saved:false,best:prev.wins};
+  tx.set(ref,{uid,name:nick,word,wins,createdAt:prev?.createdAt||serverTimestamp(),updatedAt:serverTimestamp()});
+  return {saved:true,wins};
+ });
+}
+
+window.KanjiOnline={getStreakRanks,registerStreakRank,setListener,connect,commitDeck,revealDeck,verifyDecks,startRound,sendShot,pushFrame,finishShot,offerRematch,resetRematch,leave,
  errorMessage,validCode:phoneticCode,get role(){return role},get uid(){return playerUid},get roomId(){return roomId},get latest(){return latest},get latestMeta(){return latestMeta},get deck(){return myDeck}};
 window.dispatchEvent(new Event('kanji-online-ready'));

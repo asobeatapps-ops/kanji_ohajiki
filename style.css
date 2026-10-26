@@ -186,3 +186,18 @@
 
 /* Four natural empty corner gaps without red fill, captions or decorative colors. */
 .game-scene.corner-ko .board-wrap{background:#e7d6bb}
+
+/* Ver.2.6: optional Firestore-powered streak rankings on result only */
+.streak-ranking{width:100%;max-width:520px;margin:8px auto 4px;background:#fffefa;border:1px solid #e5dfd3;border-radius:17px;padding:17px 14px 14px;text-align:left;box-shadow:0 7px 20px #313c4612}
+.streak-ranking-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.streak-ranking-top h2{font-size:19px;letter-spacing:.02em;margin:2px 0;color:#2c3c4a}
+.ranking-eyebrow{font-size:9px;letter-spacing:.15em;color:#697d8b;font-weight:950}
+.ranking-note{font-size:11px;color:#70808c;margin:9px 0 7px;line-height:1.6}
+.ranking-reload{border:1px solid #d9dedb;background:#f5f8f8;border-radius:10px;color:#415666;padding:8px;font-size:12px;font-weight:850;white-space:nowrap}
+.ranking-status{font-size:12px;color:#607483;margin:9px 0;line-height:1.6}
+.ranking-list{margin:10px 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px;max-height:340px;overflow-y:auto}
+.ranking-list>li{display:grid;grid-template-columns:32px minmax(0,1fr) 62px 67px;gap:7px;align-items:center;border-radius:9px;background:#f4f7f9;padding:9px 8px;font-size:12px;color:#273e51}
+.ranking-list .ranking-position{font-weight:950;color:#9c7b41;text-align:center}.ranking-list .ranking-name{font-weight:900;overflow-wrap:anywhere}.ranking-list .ranking-word{font-weight:900;text-align:center;color:#426a87}.ranking-list .ranking-score{font-weight:1000;color:#276caa;text-align:right}
+.ranking-register{width:100%;margin:9px 0 0;font-size:14px}
+.ranking-form{margin-top:14px;padding:13px;border-radius:11px;background:#eff5f7;display:flex;flex-direction:column;gap:9px}.ranking-form label{font-weight:900;font-size:12px;color:#3d5362}.ranking-form input{width:100%;min-height:44px;border:1px solid #b7cdd8;border-radius:9px;padding:10px;font-size:16px;background:#fff;color:#182c3c}.ranking-form p{font-size:11px;line-height:1.7;color:#6e7680;margin:0}.ranking-form .solid-btn{margin:0}
+.result-scene.streak-result{justify-content:flex-start;gap:10px;padding-top:23px}.result-scene.streak-result .result-headline{margin-bottom:7px}
