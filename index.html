@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
   <meta name="theme-color" content="#151f30">
   <meta name="description" content="漢字を弾いて、熟語に合体！角当てクリティカルで相手を場外へ。ASOBEATの無料対戦おはじきゲーム。">
-  <title>漢字おはじき Ver.2.4 | ASOBEAT</title>
-  <link rel="stylesheet" href="style.css?v=24">
-  <script defer src="physics.js?v=24"></script>
-  <script defer src="game.js?v=24"></script>
-  <script defer src="practice.js?v=24"></script>
-  <script type="module" src="online.js?v=24"></script>
+  <title>漢字おはじき Ver.2.5 | ASOBEAT</title>
+  <link rel="stylesheet" href="style.css?v=25">
+  <script defer src="physics.js?v=25"></script>
+  <script defer src="game.js?v=25"></script>
+  <script defer src="practice.js?v=25"></script>
+  <script type="module" src="online.js?v=25"></script>
 </head>
 <body>
 <div id="app">
@@ -70,12 +70,12 @@
       <div class="waiting-status"><span class="online-pulse"></span><div><b id="waitingHeadline">相手を待っています…</b><small id="waitingSub">友達に合言葉を伝えてください</small></div></div>
       <div class="practice-head"><b>本番ステージで試し打ち！</b><small>この練習は対戦に影響しません</small></div>
       <div class="practice-options" aria-label="練習する熟語の選択">
-        <label class="practice-select blue"><span>🔵 あなた</span><select id="practiceWord" aria-label="自分の完成済み熟語"><option>暴走</option><option>暴風</option><option>鉄壁</option><option>渦巻</option><option>巨大</option><option>一撃</option><option>分裂</option><option>跳弾</option><option>磁力</option><option>反射</option></select></label>
-        <label class="practice-select red"><span>🔴 CPU</span><select id="practiceOpponentWord" aria-label="CPUの完成済み熟語"><option>暴走</option><option>暴風</option><option>鉄壁</option><option>渦巻</option><option>巨大</option><option>一撃</option><option>分裂</option><option>跳弾</option><option>磁力</option><option>反射</option></select></label>
+        <label class="practice-select blue"><span>🔵 あなた</span><select id="practiceWord" aria-label="自分の完成済み熟語"><option>暴走</option><option>烈風</option><option>鉄壁</option><option>渦巻</option><option>巨大</option><option>一撃</option><option>分裂</option><option>跳弾</option><option>磁力</option><option>反射</option></select></label>
+        <label class="practice-select red"><span>🔴 CPU</span><select id="practiceOpponentWord" aria-label="CPUの完成済み熟語"><option>暴走</option><option>烈風</option><option>鉄壁</option><option>渦巻</option><option>巨大</option><option>一撃</option><option>分裂</option><option>跳弾</option><option>磁力</option><option>反射</option></select></label>
       </div>
       <div class="practice-tools"><span id="practiceTurn" class="practice-turn">先攻：あなた</span><span class="practice-blocked">四辺の場外は封鎖中</span><button id="practiceReset" type="button">↻ 最初から</button></div>
-      <canvas id="practiceBoard" width="540" height="760" aria-label="本番と同じ漢字コマと盤面を使用する試し打ち。場外はすべて封鎖されています"></canvas>
-      <p id="practiceTip" class="practice-tip">青い漢字は完成済み。画面を逆方向にドラッグして、そのまま発射できます。</p>
+      <canvas id="practiceBoard" width="540" height="760" aria-label="本番と同じ演出と盤面を使用する試し打ち。漢字をタップして選択後に発射できます"></canvas>
+      <p id="practiceTip" class="practice-tip">青い漢字をタップして選択 → 好きな場所から引っ張って発射！</p>
       <button id="roomCancelBtn" class="ghost-btn" type="button">マッチングをやめる</button>
     </div>
   </main>
@@ -189,7 +189,7 @@
       <button id="modalEndMatch" class="ghost-btn modal-end-match hidden" type="button">対戦を終了してタイトルへ戻る</button>
     </div>
   </div>
-  <div id="roulette" class="roulette hidden" aria-live="polite"><div class="roulette-glow"></div><div class="roulette-core"><span class="eyebrow">FIRST MOVE / 四分割ルーレット</span><b id="rouletteText">先攻は…</b><div class="wheel-holder"><div class="wheel-pointer"></div><div id="rouletteWheel" class="roulette-wheel"><span class="wheel-label pos-n">青</span><span class="wheel-label pos-e">赤</span><span class="wheel-label pos-s">青</span><span class="wheel-label pos-w">赤</span><span class="wheel-center">先攻</span></div></div><small class="wheel-note">青2区画・赤2区画 / 各区画25%</small></div></div>
+  <div id="roulette" class="roulette hidden" aria-live="polite"><div class="roulette-glow"></div><div class="roulette-core"><span class="eyebrow">FIRST MOVE / 四分割ルーレット</span><b id="rouletteText">先攻は…</b><div class="wheel-holder"><div class="wheel-pointer"></div><div id="rouletteWheel" class="roulette-wheel"><span class="wheel-label pos-n">青</span><span class="wheel-label pos-e">赤</span><span class="wheel-label pos-s">青</span><span class="wheel-label pos-w">赤</span><span class="wheel-center">先攻</span></div></div></div></div>
   <div id="toast" class="toast hidden" role="status"></div>
   <footer class="site-footer">© ASOBEAT · 日常にアソビのスパイスを。</footer>
 </div>
