@@ -841,13 +841,15 @@ function evaluateShot(world, shooter,dir,power,spin){
 // End-of-turn state serialization for online matches. All subsequent physics
 // runs from an authoritative snapshot. Never store transient trails or wall bodies.
 function packWorld(world){
- const bKeys=['id','text','word','owner','merged','ability','x','y','vx','vy','angle','omega','mass','invM','invI','w','h','radius','scale','growthStacks','lastGrowthTime','shotDir','parts','burstAge','burstStage','homingLeft','burstFired','shockArmed','vortexArmed','vortexTriggered','strikeSpent','strikeFirstEnemyId','splitTier','attackFactor','splitLockUntil','splitQueued','awakened','awakenAt','alive','shotAt','isLaunched','vortexHitEnemy','wallBoostAt','reflectAt','magnetArmed','magnetTriggered'];
+ const bKeys=['id','text','word','owner','merged','ability','x','y','vx','vy','angle','omega','mass','invM','invI','w','h','radius','scale','growthStacks','lastGrowthTime','shotDir','parts','burstAge','burstStage','homingLeft','burstFired','shockArmed','vortexArmed','vortexTriggered','strikeSpent','strikeFirstEnemyId','splitTier','attackFactor','splitLockUntil','splitQueued','awakened','awakenAt','alive','shotAt','isLaunched','vortexHitEnemy','wallBoostAt','reflectAt','magnetArmed','magnetTriggered','jump'];
  return {
   time:world.time,preparation:world.preparation,prepTurns:world.prepTurns,shotSerial:world.shotSerial,splitUsedShot:world.splitUsedShot,
   gateX:world.gateX,gateY:world.gateY,suddenDeath:world.suddenDeath,suddenTurns:world.suddenTurns,cornerKnockout:!!world.cornerKnockout,
   shooterId:world.shooterId,lastShooterOwner:world.lastShooterOwner,shotTime:world.shotTime,
   awakenedOwners:[...world.awakenedOwners],fields:world.fields.map(f=>({...f})),
   magnets:world.magnets.map(m=>({...m,center:{...m.center},targets:[...m.targets]})),
+  vortices:world.vortices.map(v=>({...v,center:{...v.center},targets:v.targets.map(t=>({...t}))})),
+  shocks:world.shocks.map(w=>({...w,jumpDir:{...w.jumpDir},hit:[...w.hit],pending:w.pending.map(p=>({...p}))})),
   bodies:world.bodies.filter(b=>b.alive).map(b=>{
    const obj={};for(const k of bKeys)if(b[k]!==undefined)obj[k]=b[k];return obj;
   })
@@ -873,14 +875,23 @@ function unpackWorld(snapshot){
    &&raw.parts.every(p=>p&&['x','y','w','h'].every(k=>Number.isFinite(p[k]))&&p.w>0&&p.h>0&&p.w<500&&p.h<500);
   b.parts=goodParts?raw.parts.map(part=>Array.isArray(part.polygon)?{...part,polygon:part.polygon.map(pt=>({...pt}))}:{...part})
    :shape.parts.map(part=>({x:part.x*scale,y:part.y*scale,w:part.w*scale,h:part.h*scale}));
-  b.trail=[];b.trailTime=0;b.flash=0;b.merging=false;b.jump=null;
+  b.trail=[];b.trailTime=0;b.flash=0;b.merging=false;
+  // Preserve the exact in-flight jump trajectory used by the authoritative client.
+  b.jump=raw.jump||null;
   return b;
  });
  // Reset to the canonical next ID; practice sessions on one device must not
  // change future online merge/split IDs on that device.
  idSeq=Math.max(1,...w.bodies.map(b=>b.id+1));
  w.walls=w.cornerKnockout?streakWalls():walls(w.gateX,w.gateY,w.preparation);
- w.shocks=[];w.vortices=[];
+ // These visual/physics phases must be reconstructed from the shooter's frame;
+ // otherwise vortex/shock/jump animation disappears on other devices.
+ w.shocks=(Array.isArray(snapshot.shocks)&&snapshot.shocks.length<=8?snapshot.shocks:[])
+  .filter(s=>s&&Number.isFinite(s.x)&&Number.isFinite(s.y)&&Number.isFinite(s.age)&&Number.isFinite(s.radius))
+  .map(s=>({...s,hit:new Set(s.hit||[]),pending:(s.pending||[]).map(p=>({...p}))}));
+ w.vortices=(Array.isArray(snapshot.vortices)&&snapshot.vortices.length<=8?snapshot.vortices:[])
+  .filter(v=>v&&Number.isFinite(v.center?.x)&&Number.isFinite(v.center?.y)&&Number.isFinite(v.age)&&Number.isFinite(v.range))
+  .map(v=>({...v,center:{...v.center},targets:(v.targets||[]).map(t=>({...t}))}));
  w.magnets=(Array.isArray(snapshot.magnets)&&snapshot.magnets.length<=4?snapshot.magnets:[])
   .filter(m=>m&&Number.isFinite(m.age)&&Number.isFinite(m.duration)&&Number.isFinite(m.center?.x)&&Number.isFinite(m.center?.y)&&Array.isArray(m.targets)&&m.targets.length<=72)
   .map(m=>({...m,center:{...m.center},targets:[...m.targets]}));

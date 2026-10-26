@@ -1,4 +1,4 @@
-/* 漢字おはじき Ver.2.4 | ASOBEAT — live-authoritative online sync */
+/* 漢字おはじき Ver.2.7 | ASOBEAT — cross-device layout / authoritative snapshots */
 (function(){'use strict';
 const P=window.KanjiPhysics;if(!P){document.body.textContent='物理エンジンを読み込めませんでした。';return;}
 const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'停止後1秒・敵を自動追尾','烈風':'引く強さで0.5〜3コマジャンプ・着地後に衝撃波','鉄壁':'ぶつかる攻撃を軽減（能力は普通に受ける）','渦巻':'停止後、半径約3.8コマ内の敵を2.3秒で2周','巨大':'命中で1.2倍巨大化（最大3回）','一撃':'最初の敵だけ3倍！角なら5倍！','分裂':'相手のターンに接触で分裂・1ターン1回','跳弾':'自ターンの壁衝突で加速（操作していなくても発動）','磁力':'停止後、渦巻と同じ範囲の敵だけを2秒間引き寄せ','反射':'敵がぶつかったら、受けた衝撃の100%を相手に返す'};
@@ -76,7 +76,7 @@ const saved=safeLoad();if(Array.isArray(saved.names)&&saved.names.length===2)st.
 if(Array.isArray(saved.decks)&&saved.decks.length===2)for(let i=0;i<2;i++)if(Array.isArray(saved.decks[i])&&saved.decks[i].length===3&&saved.decks[i].every(w=>WORDS.includes(w)||(w==='衝撃'||w==='爆風'||w==='暴風')))st.decks[i]=saved.decks[i].map(w=>(w==='衝撃'||w==='爆風'||w==='暴風')?'烈風':w);
 if(['easy','normal','hard'].includes(saved.diff))st.diff=saved.diff;
 if(typeof saved.sound==='boolean')st.sound=saved.sound;
-function changeScene(scene){st.scene=scene;for(const id of scenes)$(id+'Scene').classList.toggle('hidden',id!==scene);$('roulette').classList.add('hidden');$('modal').classList.add('hidden');window.scrollTo?.(0,0)}
+function changeScene(scene){st.scene=scene;for(const id of scenes)$(id+'Scene').classList.toggle('hidden',id!==scene);$('app').classList.toggle('game-active',scene==='game');$('roulette').classList.add('hidden');$('modal').classList.add('hidden');window.scrollTo?.(0,0);if(scene==='game')requestAnimationFrame(resizeCanvas)}
 function escName(n,def){return String(n||'').trim().slice(0,10)||def}
 function initDecks(){for(let player=0;player<2;player++){
  const host=$('deck'+player);host.textContent='';for(let idx=0;idx<3;idx++){
@@ -287,7 +287,7 @@ function fireShot(b,dirX,dirY,power,spin,spinStrength=1,fromNetwork=false){
   window.KanjiOnline.sendShot(move).then(shot=>{
    if(st.mode!=='online'||!online.active)return;
    online.ownShotId=shot.id;online.seenMoveId=shot.id;
-   st.phase='playing';online.shotSeq=shot.seq;online.frameStep=0;online.frameSentAt=0;online.frameBusy=false;fireShot(b,move.dx,move.dy,power,spin,spinStrength,true);
+   st.phase='playing';online.shotSeq=shot.seq;online.frameStep=0;online.frameSentAt=-Infinity;online.frameBusy=false;fireShot(b,move.dx,move.dy,power,spin,spinStrength,true);
   }).catch(e=>{st.phase='playing';const msg=networkError(e);showNetworkStatus(msg,'error');toast(msg)});
   return true;
  }
@@ -381,7 +381,9 @@ function tickPhysics(dt){if(st.hitstop>0){st.hitstop=Math.max(0,st.hitstop-dt);r
  while(st.acc>=1/120&&steps<8&&st.phase==='moving'){
   P.step(st.world,1/120,collisionHooks());st.acc-=1/120;steps++;
  }
- if(steps===8)st.acc=0;
+ // Preserve unpaid simulation time across slower display frames; never drop physics ticks.
+ // Cap the backlog so a background/resumed tab cannot run seconds of physics in a single frame.
+ st.acc=Math.min(st.acc,.25);
  if(st.mode==='streak'&&st._streakFirstOut!==null){
   // The winner is the side whose piece crossed a KO corner SECOND.
   // If the CPU fell first and the player followed, the streak still grows.
@@ -714,11 +716,33 @@ function drawArenaGeometry(world=st.world,context=ctx){
  }
  ctx.restore();
 }
-function resizeCanvas(){const canvas=$('board'),dpr=Math.min(2,window.devicePixelRatio||1);canvas.width=Math.round(W*dpr);canvas.height=Math.round(H*dpr);
+function resizeCanvas(){
+ // The game always uses logical coordinates W=540,H=760 on ALL devices.
+ // Only CSS size and HiDPI raster resolution change, never gameplay geometry.
+ const canvas=$('board'),wrap=$('boardWrap'),scene=$('gameScene');
+ if(st.scene!=='game')return;
+ const dpr=Math.max(1,Math.min(2,window.devicePixelRatio||1));
+ const pxW=Math.round(W*dpr),pxH=Math.round(H*dpr);
+ if(canvas.width!==pxW||canvas.height!==pxH){canvas.width=pxW;canvas.height=pxH;}
  ctx.setTransform(canvas.width/W,0,0,canvas.height/H,0,0);
- const b=$('boardWrap');const holder=b.parentElement,hs=getComputedStyle(holder);const innerW=holder.clientWidth-parseFloat(hs.paddingLeft||0)-parseFloat(hs.paddingRight||0);const availableWidth=Math.max(150,Math.min(innerW,540));
- const cap=Math.min(window.innerHeight-200,820);const h=Math.max(235,Math.min(availableWidth*H/W,cap));const w=h*W/H;
- b.style.width=`${w}px`;b.style.height=`${h}px`;b.style.flex='0 0 auto';
+ const css=getComputedStyle(scene);
+ const horizontalPadding=(parseFloat(css.paddingLeft)||0)+(parseFloat(css.paddingRight)||0);
+ const verticalPadding=(parseFloat(css.paddingTop)||0)+(parseFloat(css.paddingBottom)||0);
+ const gap=parseFloat(css.rowGap||css.gap)||0;
+ const viewportH=window.visualViewport?.height||window.innerHeight;
+ const viewportTop=window.visualViewport?.offsetTop||0;
+ const top=scene.getBoundingClientRect().top-viewportTop;
+ const hud=$('gameScene').querySelector('.game-hud').getBoundingClientRect().height;
+ const bottom=$('gameScene').querySelector('.game-bottom').getBoundingClientRect().height;
+ const status=$('onlineGameStatus');
+ const statusH=status.classList.contains('hidden')?0:status.getBoundingClientRect().height+gap;
+ const width=Math.max(120,Math.min(W,scene.clientWidth-horizontalPadding));
+ // Footer lies below the game scene in the same constrained flex column.
+ const footer=document.querySelector('.site-footer');
+ const footerH=footer?.getBoundingClientRect().height||0;
+ const freeH=Math.max(130,viewportH-top-verticalPadding-hud-bottom-statusH-footerH-3*gap-5);
+ const h=Math.min(820,width*H/W,freeH),w=h*W/H;
+ wrap.style.width=`${w}px`;wrap.style.height=`${h}px`;wrap.style.flex='0 0 auto';
 }
 function drawPiece(b,context=ctx,selected=st.selected){const ctx=context;const color=b.owner===0?'#2473ab':'#c7504f',dark=b.owner===0?'#174766':'#782d30';
  const shine=b.owner===0?'#9fddfa':'#ffd2b9';
@@ -893,13 +917,13 @@ function paint(dt){if(!st.world||st.scene!=='game')return;
  ctx.restore();
 }
 function mainLoop(ts){let dt=animLast?Math.min(.06,(ts-animLast)/1000):.016;animLast=ts;st.time+=dt;
- if(st.scene==='game'){if(st.phase==='moving')tickPhysics(dt);if(st.phase==='remoteStream')updateRemoteBlend(ts);renderFx(dt);paint(dt)}
+ if(st.scene==='game'){if(st.phase==='moving'){tickPhysics(dt);if(st.phase==='moving')sendLiveFrame();}if(st.phase==='remoteStream')updateRemoteBlend(ts);renderFx(dt);paint(dt)}
  rafId=requestAnimationFrame(mainLoop)
 }
 // ===== Online mode: matchmaking, hidden deck lock, turn-by-turn sync =====
 const freshStats=()=>({outs:[0,0],merges:[0,0],crits:[0,0],awakens:[0,0]});
 const networkError=e=>window.KanjiOnline?.errorMessage?.(e)||String(e?.message||e||'通信エラー');
-function showNetworkStatus(text,kind=''){const el=$('onlineGameStatus');if(st.mode!=='online'){el.className='online-game-status hidden';return;}el.className='online-game-status '+kind;el.textContent=text;}
+function showNetworkStatus(text,kind=''){const el=$('onlineGameStatus');if(st.mode!=='online'){el.className='online-game-status hidden';return;}const was=el.className,old=el.textContent;el.className='online-game-status '+kind;el.textContent=text;if(st.scene==='game'&&(was!==el.className||old!==text))requestAnimationFrame(resizeCanvas);}
 function onlineUIError(msg){$('matchError').textContent=msg;$('matchError').classList.remove('hidden');}
 function openOnlineMatch(){
  cancelAsync();st.mode='online';st.phase='match';st.world=null;
@@ -1070,9 +1094,22 @@ function enterOnlineSnapshot(room){
 }
 function resumeOwnOnlineMove(move){
  if(!online.active||st.mode!=='online'||!move||move.seq!==online.seq||st.phase!=='playing')return;
- online.ownShotId=move.id;online.shotSeq=move.seq;online.frameStep=0;
- online.frameSentAt=0;online.frameBusy=false;
- replayOnlineMove(move);
+ const recorded=online.pendingRoom?.liveFrame||window.KanjiOnline?.latest?.liveFrame;
+ online.ownShotId=move.id;online.shotSeq=move.seq;
+ online.frameSentAt=-Infinity;online.frameBusy=false;
+ // A reload during a shot must continue from the LATEST accepted server
+ // frame, not from the opening board. Otherwise both players watch a rewind.
+ if(recorded?.id===move.id&&recorded?.seq===move.seq&&recorded.world){
+  try{
+   st.world=P.unpackWorld(recorded.world);online.seenMoveId=move.id;
+   online.frameStep=Math.max(0,recorded.step|0);
+   st.phase='moving';st.acc=0;st.moving=0;st.still=0;
+   st.shotCount=move.seq+1;st.vortexPlayed=!!st.world.bodies.find(b=>b.id===st.world.shooterId)?.vortexTriggered;
+   st.magnetPlayed=!!st.world.bodies.find(b=>b.id===st.world.shooterId)?.magnetTriggered;
+   showNetworkStatus('直前の盤面から発射を再開しています…','pending');return;
+  }catch(e){/* Invalid frame: fall back to exact shot replay. */}
+ }
+ online.frameStep=0;replayOnlineMove(move);
  if(st.phase==='moving')showNetworkStatus('未完了の発射を復旧して同期中…','pending');
  else {online.ownShotId=null;showNetworkStatus('発射の復旧に失敗しました。もう一度読み込んでください。','error');}
 }
@@ -1082,7 +1119,12 @@ function replayOnlineMove(move){
  const b=st.world.bodies.find(x=>x.id===move.bodyId&&x.alive);
  if(!b){showNetworkStatus('相手の手を同期できません。盤面更新を待っています。','error');st.phase='syncing';return;}
  fireShot(b,move.dx,move.dy,move.power,move.spin,move.spinStrength,true);
- showNetworkStatus('相手の発射を再生中…','pending');
+ if(move.by!==online.uid){
+  // Physics is simulated by the shooter only. The remote device displays
+  // interpolation of signed-in shooter's snapshots, never a competing result.
+  st.phase='remoteStream';st.acc=0;st.hitstop=0;st.moving=0;
+ }
+ showNetworkStatus('相手の盤面を受信中…','pending');
 }
 // Every ~650ms publish an authoritative in-flight picture of the board.
 // No extra Firestore writes when nobody is moving, outside an actual shot,
@@ -1112,7 +1154,7 @@ function applyRemoteFrame(room){
    blend.push({body:b,from:before,to:{x:b.x,y:b.y,angle:b.angle}});
    b.x=before.x;b.y=before.y;b.angle=before.angle;
   }
-  online.remoteBlend={start:performance.now(),duration:420,items:blend};
+  online.remoteBlend={start:performance.now(),duration:620,items:blend};
   st.world=w;st.shotCount=room.seq+1;st.turn=room.turn;
   st.phase='remoteStream';st.hitstop=0;st.acc=0;st.moving=0;st.still=0;st.drag=null;
   online.lastFrameId=frame.id;online.lastFrameStep=frame.step;
@@ -1224,7 +1266,10 @@ $('abilitySetup').innerHTML=abilityManualHTML();$('onlineAbilityGuide').innerHTM
 $('modalClose').addEventListener('click',closeModal);$('modalOK').addEventListener('click',closeModal);$('modal').addEventListener('click',e=>{if(e.target===$('modal'))closeModal()});
 $('soundBtn').addEventListener('click',()=>{st.sound=!st.sound;$('soundBtn').classList.toggle('muted',!st.sound);$('soundBtn').textContent=st.sound?'♪':'×';if(st.sound){initAudio();sound('tap')}save()});
 $('soundBtn').classList.toggle('muted',!st.sound);$('soundBtn').textContent=st.sound?'♪':'×';
-window.addEventListener('resize',()=>{if(st.scene==='game')resizeCanvas()});
+window.addEventListener('resize',resizeCanvas);
+window.visualViewport?.addEventListener('resize',resizeCanvas);
+window.visualViewport?.addEventListener('scroll',resizeCanvas);
+document.addEventListener('visibilitychange',()=>{animLast=0;st.acc=0;if(!document.hidden&&st.mode==='online'&&st.scene==='game'){showNetworkStatus('サーバーの最新盤面を確認中…','pending');const room=window.KanjiOnline?.latest;if(room&&!window.KanjiOnline?.latestMeta?.fromCache)handleOnlineRoom(room,window.KanjiOnline.latestMeta||{});}});
 window.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();return}if(e.code==='Space'&&st.scene==='game'&&st.drag&&st.drag.body&&st.drag.power>.06){e.preventDefault();const d=st.drag;fireShot(d.body,d.dx,d.dy,d.power,st.spin,d.spinStrength??1)}});
 // Extra hook for deterministic and automated smoke tests; only exposed when ?test=1.
 if(new URLSearchParams(location.search).has('test'))window.__KANJI_TEST__={st,P,online,setup,confirm,startMatch,fireShot,finishGame,finishShot,beginTurn,selectPiece,selectable,findSelected,aimSpinAt,draw:()=>paint(.016),cpuTakeTurn,resizeCanvas,tickPhysics,collisionHooks,handleOnlineRoom,enterOnlineSnapshot,showOnlineDeck,requestOnlineRematch,joinOnlineRoom,openOnlineMatch,startStreak,showStreakSetup,streakWin,streakDefeated,spawnStreakCpu,WORD_GROUPS};

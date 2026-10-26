@@ -201,3 +201,21 @@
 .ranking-register{width:100%;margin:9px 0 0;font-size:14px}
 .ranking-form{margin-top:14px;padding:13px;border-radius:11px;background:#eff5f7;display:flex;flex-direction:column;gap:9px}.ranking-form label{font-weight:900;font-size:12px;color:#3d5362}.ranking-form input{width:100%;min-height:44px;border:1px solid #b7cdd8;border-radius:9px;padding:10px;font-size:16px;background:#fff;color:#182c3c}.ranking-form p{font-size:11px;line-height:1.7;color:#6e7680;margin:0}.ranking-form .solid-btn{margin:0}
 .result-scene.streak-result{justify-content:flex-start;gap:10px;padding-top:23px}.result-scene.streak-result .result-headline{margin-bottom:7px}
+
+/* Ver.2.7 -- device-independent 540x760 board; viewport chrome and safe-areas. */
+#app.game-active{height:100dvh;min-height:0;overflow:hidden;}
+#app.game-active .game-scene{min-height:0;min-width:0;flex:1 1 auto;}
+#app.game-active .board-wrap{max-height:none;max-width:100%;min-height:0;min-width:0;flex-shrink:0;}
+#app.game-active .game-hud,#app.game-active .game-bottom{flex:0 0 auto;}
+#app.game-active .site-footer{flex:0 0 auto;padding-bottom:max(8px,env(safe-area-inset-bottom,0px));}
+#app.game-active .board-wrap canvas{object-fit:fill;}
+#practiceBoard{max-width:100%;}
+@media (orientation:landscape) and (max-height:460px){
+ #app.game-active .brandbar{height:38px;min-height:38px;}
+ #app.game-active .game-hud{min-height:33px;}
+ #app.game-active .game-bottom{min-height:35px;padding:3px 5px;}
+ #app.game-active .site-footer{padding:2px 0 max(3px,env(safe-area-inset-bottom,0px));}
+ #app.game-active .game-scene{gap:2px;padding:2px 4px;}
+}
+/* On standalone iOS/PWA, keep the header clear of the display cutout. */
+#app{padding-top:env(safe-area-inset-top,0px);}

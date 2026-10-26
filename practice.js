@@ -23,7 +23,17 @@ function reset(){
  message('青「'+word+'」をタップして選択 → 好きな場所からドラッグで発射！');
  draw();
 }
-function coords(e){const rect=canvas.getBoundingClientRect();return {x:(e.clientX-rect.left)*P.W/rect.width,y:(e.clientY-rect.top)*P.H/rect.height};}
+function coords(e){
+ const rect=canvas.getBoundingClientRect(),css=getComputedStyle(canvas);
+ const l=parseFloat(css.borderLeftWidth)||0,r=parseFloat(css.borderRightWidth)||0;
+ const top=parseFloat(css.borderTopWidth)||0,bt=parseFloat(css.borderBottomWidth)||0;
+ const w=Math.max(1,rect.width-l-r),h=Math.max(1,rect.height-top-bt);
+ return {x:(e.clientX-rect.left-l)*P.W/w,y:(e.clientY-rect.top-top)*P.H/h};
+}
+function resizePractice(){const dpr=Math.max(1,Math.min(2,devicePixelRatio||1));const w=Math.round(P.W*dpr),h=Math.round(P.H*dpr);if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;draw()}}
+window.addEventListener('resize',resizePractice);
+window.visualViewport?.addEventListener('resize',resizePractice);
+
 function shot(piece,dx,dy,power,spin,spinStrength=1){
  if(!piece||!piece.alive||!world||phase==='moving')return;
  P.fire(world,piece,dx,dy,power,spin,spinStrength);visual.shoot(piece);phase='moving';drag=null;selected=null;elapsed=0;acc=0;still=0;vortexResolved=false;magnetResolved=false;
@@ -75,7 +85,7 @@ function tick(now){raf=0;if(!playing)return;
   if(visual.hitstop>0){visual.hitstop=Math.max(0,visual.hitstop-dt)}else{
   elapsed+=dt;acc+=dt;let n=0;
   while(acc>=DT&&n<9){P.step(world,DT,visual.hooks);acc-=DT;n++;}
-  if(n>=9)acc=0;
+  acc=Math.min(acc,.25);
   if(elapsed>.42&&P.allStopped(world))still+=dt;else still=0;
   if(still>.46||elapsed>14){
    const shooter=world.bodies.find(b=>b.id===world.shooterId&&b.alive);
@@ -94,7 +104,7 @@ function tick(now){raf=0;if(!playing)return;
  visual.update(dt);draw(dt);raf=requestAnimationFrame(tick);
 }
 function draw(dt=.016){if(!world||!R)return;R.drawPractice(canvas,world,selected,drag,visual,dt);}
-function start(){if(!world)reset();if(!playing){playing=true;last=0;raf=requestAnimationFrame(tick)}}
+function start(){if(!world)reset();resizePractice();if(!playing){playing=true;last=0;raf=requestAnimationFrame(tick)}}
 function stop(){playing=false;drag=null;selected=null;last=0;if(raf)cancelAnimationFrame(raf);raf=0;if(scheduledCPU)clearTimeout(scheduledCPU);scheduledCPU=0}
 $('practiceWord').addEventListener('change',reset);
 $('practiceOpponentWord').addEventListener('change',reset);
