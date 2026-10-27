@@ -219,3 +219,14 @@
 }
 /* On standalone iOS/PWA, keep the header clear of the display cutout. */
 #app{padding-top:env(safe-area-inset-top,0px);}
+
+/* Ver.2.7.1: suppress accidental double-tap zoom without disabling accessibility zoom globally.
+   manipulation preserves pinch zoom on non-game screens and stops double-tap zoom. */
+html, body, #app { touch-action: manipulation; }
+/* During a match the full aiming surface is owned by the game, including its overlays. */
+#gameScene, #gameScene .board-wrap, #gameScene #board, #practiceBoard {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}

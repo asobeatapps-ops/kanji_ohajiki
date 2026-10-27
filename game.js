@@ -1,4 +1,4 @@
-/* 漢字おはじき Ver.2.7 | ASOBEAT — cross-device layout / authoritative snapshots */
+/* 漢字おはじき Ver.2.7.1 | ASOBEAT — cross-device layout / authoritative snapshots */
 (function(){'use strict';
 const P=window.KanjiPhysics;if(!P){document.body.textContent='物理エンジンを読み込めませんでした。';return;}
 const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'停止後1秒・敵を自動追尾','烈風':'引く強さで0.5〜3コマジャンプ・着地後に衝撃波','鉄壁':'ぶつかる攻撃を軽減（能力は普通に受ける）','渦巻':'停止後、半径約3.8コマ内の敵を2.3秒で2周','巨大':'命中で1.2倍巨大化（最大3回）','一撃':'最初の敵だけ3倍！角なら5倍！','分裂':'相手のターンに接触で分裂・1ターン1回','跳弾':'自ターンの壁衝突で加速（操作していなくても発動）','磁力':'停止後、渦巻と同じ範囲の敵だけを2秒間引き寄せ','反射':'敵がぶつかったら、受けた衝撃の100%を相手に返す'};
@@ -1232,6 +1232,28 @@ $('spinLeft').addEventListener('click',()=>{st.spin=-1;$('spinLeft').classList.a
 // Use the entire game scene as an aim surface, not only the canvas.
 // Capturing at scene level preserves the drag if a finger crosses its edge.
 window.addEventListener('pointerdown',secondFingerCancel,{capture:true,passive:false});
+
+// Ver.2.7.1: iOS/Android double-tap-to-zoom fallback for the game interaction surfaces.
+// touch-action is the primary prevention. This guard only cancels a browser gesture
+// on a second quick touch at roughly the same point. Pointer-based shot control stays intact.
+(function preventAccidentalMatchZoom(){
+ const regions=[$('gameScene'),$('practiceBoard')];
+ let last={time:0,x:0,y:0,region:null};
+ for(const region of regions){
+  region.addEventListener('dblclick',event=>{event.preventDefault();},{capture:true});
+  region.addEventListener('touchend',event=>{
+   if(event.touches.length||event.changedTouches.length!==1){last.time=0;return;}
+   if(event.target.closest?.('button, input, select, textarea, a, label')){last.time=0;return;}
+   const touch=event.changedTouches[0],now=performance.now();
+   const doubleTap=last.region===region && now-last.time<310 &&
+    Math.hypot(touch.clientX-last.x,touch.clientY-last.y)<28;
+   last=doubleTap?{time:0,x:0,y:0,region:null}:
+    {time:now,x:touch.clientX,y:touch.clientY,region};
+   if(doubleTap&&event.cancelable)event.preventDefault();
+  },{capture:true,passive:false});
+ }
+})();
+
 $('gameScene').addEventListener('pointerdown',pointerDown);
 $('board').addEventListener('contextmenu',e=>{e.preventDefault();const piece=findInspectable(boardPoint(e));if(piece)showPieceInfo(piece)});
 $('pieceInfoClose').addEventListener('click',closePieceInfo);
