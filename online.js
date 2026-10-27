@@ -1,4 +1,4 @@
-/* 漢字おはじき Ver.2.2 — authoritative shooter snapshots.
+/* 漢字おはじき Ver.2.7.3 — authoritative shooter snapshots.
    The shooter's physics is authoritative. During an active shot, lightweight
    periodic snapshots prevent cross-device font/physics drift. Turn-end state
    is committed in a Firestore transaction. Server-side game anti-cheat is NOT supplied. */
@@ -119,15 +119,15 @@ async function sendShot(move){
   const snap=await tx.get(roomRef),d=snap.data();
   if(!d||d.stage!=='playing'||d.move!==null)throw Error('まだ発射できません。前の操作の同期を確認してください。');
   if(d.turn!==(role==='host'?0:1))throw Error('相手のターンです');
-  shot.seq=d.seq;tx.update(roomRef,{move:shot,liveFrame:null,updatedAt:serverTimestamp()});
+  shot.seq=d.seq;shot.round=d.round;tx.update(roomRef,{move:shot,liveFrame:null,updatedAt:serverTimestamp()});
  });return shot;
 }
-// Maximum ~1.5 snapshots/sec per ongoing shot. Old/stale frames are ignored by
+// Approximately 2.2 snapshots/sec per ongoing shot. Old/stale frames are ignored by
 // the receiving client and (with production rules) rejected after shot completion.
-async function pushFrame(shotId,seq,step,snapshot){
+async function pushFrame(shotId,seq,step,snapshot,round){
  assertConnected();
  if(!Number.isInteger(step)||step<1||step>10000)throw Error('同期番号が不正です');
- await updateDoc(roomRef,{liveFrame:{id:shotId,seq,step,world:snapshot},updatedAt:serverTimestamp()});
+ await updateDoc(roomRef,{liveFrame:{id:shotId,seq,step,round,world:snapshot},updatedAt:serverTimestamp()});
 }
 async function finishShot(shotId,snapshot,turn,stats,result){
  assertConnected();await runTransaction(db,async tx=>{

@@ -1,7 +1,7 @@
-/* 漢字おはじき Ver.2.7.1 | ASOBEAT — cross-device layout / authoritative snapshots */
+/* 漢字おはじき Ver.2.7.3 | ASOBEAT — cross-device layout / authoritative snapshots */
 (function(){'use strict';
 const P=window.KanjiPhysics;if(!P){document.body.textContent='物理エンジンを読み込めませんでした。';return;}
-const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'停止後1秒・敵を自動追尾','烈風':'引く強さで0.5〜3コマジャンプ・着地後に衝撃波','鉄壁':'ぶつかる攻撃を軽減（能力は普通に受ける）','渦巻':'停止後、半径約3.8コマ内の敵を2.3秒で2周','巨大':'命中で1.2倍巨大化（最大3回）','一撃':'最初の敵だけ3倍！角なら5倍！','分裂':'相手のターンに接触で分裂・1ターン1回','跳弾':'自ターンの壁衝突で加速（操作していなくても発動）','磁力':'停止後、渦巻と同じ範囲の敵だけを2秒間引き寄せ','反射':'敵がぶつかったら、受けた衝撃の100%を相手に返す'};
+const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'停止後1秒・敵を自動追尾','烈風':'引く強さで0.5〜3コマジャンプ・着地後に衝撃波','鉄壁':'ぶつかる攻撃を軽減（能力は普通に受ける）','渦巻':'停止後、半径約3.8コマ内の敵味方を2.3秒で2周（自身を除く）','巨大':'命中で1.2倍巨大化（最大3回）','一撃':'最初の敵だけ3倍！角なら5倍！','分裂':'相手のターンに接触で分裂・1ターン1回','跳弾':'自ターンの壁衝突で加速（操作していなくても発動）','磁力':'停止後、渦巻と同じ範囲の敵だけを2秒間引き寄せ','反射':'敵がぶつかったら、受けた衝撃の100%を相手に返す'};
 const WORD_GROUPS=[
  {name:'アタック型',key:'attack',words:['暴走','一撃','跳弾'],description:'攻めと場外KOを狙う'},
  {name:'ディフェンス型',key:'defense',words:['鉄壁','磁力'],description:'守りながら相手を崩す'},
@@ -25,7 +25,7 @@ const scenes=['home','streak','match','onlineDeck','setup','confirm','game','res
 const st={scene:'home',mode:'solo',diff:'normal',decks:[['暴走','烈風','鉄壁'],['烈風','鉄壁','暴走']],names:['青チーム','CPU'],world:null,phase:'title',turn:0,spin:1,drag:null,selected:null,fx:[],texts:[],bannerUntil:0,shake:0,flash:0,hitstop:0,time:0,acc:0,moving:0,still:0,shotCount:0,stats:{outs:[0,0],merges:[0,0],crits:[0,0],awakens:[0,0]},vortexPlayed:false,magnetPlayed:false,turnToken:0,sound:true,result:null,geom:null,streakWins:0,streakWord:'暴走',streakNextWord:null};
 let audio=null,noiseBuffer=null,animLast=0,rafId=0;let timers=[];
 let phaseNoticeTimer=null,infoTimer=null,holdPiece=null,suppressAimUp=null;
-const online={active:false,role:null,uid:null,slot:null,round:0,seq:-1,seenMoveId:null,ownShotId:null,starting:false,revealing:false,publishing:false,resetting:false,committed:false,rematch:false,gameReady:false,pendingRoom:null,lastError:'',frameStep:0,frameSentAt:0,frameBusy:false,lastFrameStep:0,lastFrameId:null,shotSeq:-1,frameWarningAt:0,remoteBlend:null};
+const online={active:false,role:null,uid:null,slot:null,round:0,seq:-1,seenMoveId:null,ownShotId:null,starting:false,revealing:false,publishing:false,resetting:false,committed:false,rematch:false,gameReady:false,pendingRoom:null,lastError:'',frameStep:0,frameSentAt:0,frameBusy:false,lastFrameStep:0,lastFrameId:null,shotSeq:-1,frameWarningAt:0,remoteBlend:null,remotePredictAcc:0,remoteSinceFrame:0,framePromise:null,forceFrame:false,remoteImpactTimes:new Map()};
 let onlineDeck=['暴走','烈風','鉄壁'];
 try{let prior=JSON.parse(localStorage.getItem('asobeat_kanji_online_deck')||'null');if(Array.isArray(prior)&&prior.length===3&&prior.every(w=>WORDS.includes(w)||(w==='衝撃'||w==='爆風'||w==='暴風')))onlineDeck=prior.map(w=>(w==='衝撃'||w==='爆風'||w==='暴風')?'烈風':w)}catch{}
 
@@ -50,7 +50,7 @@ function showPieceInfo(b){
  $('pieceInfoTitle').textContent=`${side}チーム｜${b.text}${b.merged?'':'（未合体）'}`;
  $('pieceInfoBody').textContent=b.merged
   ? `${rule?.kind||'特殊能力'}：${rule?.timing||''}\n${rule?.numbers||''}`
-  : `「${b.word}」の漢字コマです。もう片方の漢字とぶつけると「${b.word}」に合体します。\n合体後：${rule?.kind||''}。${rule?.timing||''}`;
+  : `「${b.word}」の漢字コマです。同じチームのもう片方の漢字とぶつけると「${b.word}」に合体します。\n合体後：${rule?.kind||''}。${rule?.timing||''}`;
  $('pieceInfo').classList.remove('hidden');
  if(infoTimer)clearTimeout(infoTimer);
  infoTimer=setTimeout(closePieceInfo,6500);
@@ -286,7 +286,7 @@ function fireShot(b,dirX,dirY,power,spin,spinStrength=1,fromNetwork=false){
   st.phase='sending';showNetworkStatus('発射情報を相手へ送っています…','pending');
   window.KanjiOnline.sendShot(move).then(shot=>{
    if(st.mode!=='online'||!online.active)return;
-   online.ownShotId=shot.id;online.seenMoveId=shot.id;
+   online.ownShotId=shot.id;online.seenMoveId=shot.id;online.forceFrame=true;
    st.phase='playing';online.shotSeq=shot.seq;online.frameStep=0;online.frameSentAt=-Infinity;online.frameBusy=false;fireShot(b,move.dx,move.dy,power,spin,spinStrength,true);
   }).catch(e=>{st.phase='playing';const msg=networkError(e);showNetworkStatus(msg,'error');toast(msg)});
   return true;
@@ -343,7 +343,7 @@ function collisionHooks(){return {
  },
  merge:(a,b)=>{
   if(st.phase==='result')return;
-  const m=P.createMerged(st.world,a,b);st.stats.merges[st.world.lastShooterOwner]++;
+  const m=P.createMerged(st.world,a,b);st.stats.merges[m.owner]++;
   addParticles(m.x,m.y,30,'#e8ae55',1.6);addRing(m.x,m.y,'#eaba65',100);st.shake=4.5;st.flash=.20;st.hitstop=Math.max(st.hitstop,.065);
   showText('『'+m.word+'』合体!!',m.x,m.y,'#fff2b9');showEffect(m.word+' 合体成功！',1050);sound('merge');
  },
@@ -355,7 +355,7 @@ function collisionHooks(){return {
   st.stats.outs[1-b.owner]++;const pos={x:clamp(b.x,25,W-25),y:clamp(b.y,25,H-25)};
   addParticles(pos.x,pos.y,20,b.owner===0?'#3989c5':'#d35b58',1.3);st.shake=4.8;showText('場外!!',pos.x,pos.y,'#ffe9bb');sound('out');updateHud();
  },
- ability:(b,name)=>{if(name==='burst'){addRing(b.x,b.y,'#e75552',115);addParticles(b.x,b.y,23,'#f67252',1.4);showText('暴走開始!!',b.x,b.y,'#f9a36d');showEffect('暴走加速!!',900);sound('burst')}},
+ ability:(b,name)=>{if(name==='burst'){if(st.mode==='online'&&online.ownShotId)online.forceFrame=true;addRing(b.x,b.y,'#e75552',115);addParticles(b.x,b.y,23,'#f67252',1.4);showText('暴走開始!!',b.x,b.y,'#f9a36d');showEffect('暴走加速!!',900);sound('burst')}},
  shockLand:(b,wave)=>{
   if(!wave)return;
   st.shake=5.5;st.hitstop=Math.max(st.hitstop,.05);st.flash=.32;
@@ -398,6 +398,7 @@ function tickPhysics(dt){if(st.hitstop>0){st.hitstop=Math.max(0,st.hitstop-dt);r
     if(m){
      st.still=0;st.moving=0;st.acc=0;
      addRing(shooter.x,shooter.y,'#6adacb',m.range);addParticles(shooter.x,shooter.y,55,'#87ffdb',1.55);st.shake=Math.max(st.shake,5);st.flash=Math.max(st.flash,.20);showText('磁力！ 強力吸引',shooter.x,shooter.y,'#b6ffec');
+     if(st.mode==='online'&&online.ownShotId)online.forceFrame=true;
      showEffect('磁力発動！ 範囲内の敵のみ吸引！',1150);sound('shock');return;
     }
    }
@@ -407,7 +408,8 @@ function tickPhysics(dt){if(st.hitstop>0){st.hitstop=Math.max(0,st.hitstop-dt);r
     if(v){
      st.still=0;st.moving=0;st.acc=0;
      addRing(shooter.x,shooter.y,'#a875ed',v.range);addParticles(shooter.x,shooter.y,26,'#9c78ef',1.1);
-     showEffect('渦巻・近くの敵だけを2.3秒で2周！',1200);sound('shock');return;
+     if(st.mode==='online'&&online.ownShotId)online.forceFrame=true;
+     showEffect('渦巻・近くの敵味方を2.3秒で2周！',1200);sound('shock');return;
     }
    }
    P.settle(st.world);st.acc=0;
@@ -911,13 +913,21 @@ function paint(dt){if(!st.world||st.scene!=='game')return;
  ctx.drawImage(artCanvas,0,0,W,H);
  drawArenaGeometry();
  drawFields();drawVortices();drawMagnets();drawTrails(dt);
- for(const b of st.world.bodies)if(b.alive){drawPiece(b)}
+ const blend=st.phase==='remoteStream'?online.remoteBlend:null;
+ const blendFactor=blend?1-clamp((performance.now()-blend.start)/blend.duration,0,1):0;
+ for(const b of st.world.bodies)if(b.alive){
+  const correction=blendFactor?blend?.offsets.get(b.id):null;
+  if(correction){const x=b.x,y=b.y,angle=b.angle;
+   b.x+=correction.dx*blendFactor;b.y+=correction.dy*blendFactor;b.angle+=correction.da*blendFactor;
+   drawPiece(b);b.x=x;b.y=y;b.angle=angle;
+  }else drawPiece(b);
+ }
  drawDrag();drawOverlays();
  if(st.flash>0){ctx.fillStyle=`rgba(255,250,214,${st.flash*.48})`;ctx.fillRect(0,0,W,H)}
  ctx.restore();
 }
 function mainLoop(ts){let dt=animLast?Math.min(.06,(ts-animLast)/1000):.016;animLast=ts;st.time+=dt;
- if(st.scene==='game'){if(st.phase==='moving'){tickPhysics(dt);if(st.phase==='moving')sendLiveFrame();}if(st.phase==='remoteStream')updateRemoteBlend(ts);renderFx(dt);paint(dt)}
+ if(st.scene==='game'){if(st.phase==='moving'){tickPhysics(dt);if(st.phase==='moving')sendLiveFrame();}if(st.phase==='remoteStream')tickRemoteStream(dt);renderFx(dt);paint(dt)}
  rafId=requestAnimationFrame(mainLoop)
 }
 // ===== Online mode: matchmaking, hidden deck lock, turn-by-turn sync =====
@@ -984,7 +994,7 @@ async function lockOnlineDeck(){const net=window.KanjiOnline;if(!net||!online.ac
 }
 function resetOnlineViewForRound(round){
  online.round=round;online.seq=-1;online.seenMoveId=null;online.ownShotId=null;
- online.starting=false;online.revealing=false;online.committed=false;online.publishing=false;online.resetting=false;online.rematch=false;online.gameReady=false;online.frameBusy=false;online.lastFrameStep=0;online.lastFrameId=null;online.shotSeq=-1;online.remoteBlend=null;
+ online.starting=false;online.revealing=false;online.committed=false;online.publishing=false;online.resetting=false;online.rematch=false;online.gameReady=false;online.frameBusy=false;online.lastFrameStep=0;online.lastFrameId=null;online.shotSeq=-1;online.remoteBlend=null;online.remotePredictAcc=0;online.remoteSinceFrame=0;online.framePromise=null;online.forceFrame=false;
 }
 function handleOnlineRoom(room,meta={}){
  if(st.mode!=='online'||!online.active)return;
@@ -1005,7 +1015,16 @@ function handleOnlineRoom(room,meta={}){
   else{st.phase='closed';showNetworkStatus(msg,'error');onModal('<p>'+msg+'</p>','対戦が終了しました',true);}
   return;
  }
+ if(room.round<online.round)return; // delayed events from a previous match
  if(room.round!==online.round){resetOnlineViewForRound(room.round);}
+ // A user's team is bound to their Firebase UID, never to the roulette result.
+ const expectedSlot=room.hostUid===online.uid?0:room.guestUid===online.uid?1:-1;
+ if(expectedSlot<0||(online.role==='host'?0:1)!==expectedSlot){
+  const msg='参加者とチームの対応が一致しません。対戦ルームへ入り直してください。';
+  if(st.scene==='game')showNetworkStatus(msg,'error');else if(st.scene==='onlineDeck')$('onlineReadyStatus').textContent=msg;else onlineUIError(msg);
+  return;
+ }
+ online.slot=expectedSlot;
  if(room.stage==='waiting'){
   if(st.scene!=='match'){cancelAsync();changeScene('match');}
   $('waitingPanel').classList.remove('hidden');$('waitingHeadline').textContent='友達の参加を待っています…';
@@ -1024,7 +1043,13 @@ function handleOnlineRoom(room,meta={}){
    online.starting=true;
    (async()=>{
     if(!await window.KanjiOnline.verifyDecks(room))return;
-    const world=P.newWorld();P.spawnInitial(world,[room.hostReveal.deck,room.guestReveal.deck]);
+    const world=P.newWorld();
+    // HOST is always BLUE (owner 0); GUEST is always RED (owner 1),
+    // regardless of who wins the first-turn roulette or how many rematches occur.
+    const decks=[room.hostReveal.deck,room.guestReveal.deck];
+    P.spawnInitial(world,decks);
+    if(!P.initialTeamDecksMatch(world,decks))throw Error('対戦デッキの配置に失敗しました');
+    world.teamUids=[room.hostUid,room.guestUid];world.teamDecks=decks.map(d=>[...d]);
     const arr=new Uint8Array(1);crypto.getRandomValues(arr);
     await window.KanjiOnline.startRound(P.packWorld(world),arr[0]%2,room.round);
    })().catch(e=>{$('onlineReadyStatus').textContent=networkError(e)}).finally(()=>{online.starting=false});
@@ -1042,7 +1067,7 @@ function handleOnlineRoom(room,meta={}){
   }
   if(st.scene==='game'){
    if(room.seq>online.seq){enterOnlineSnapshot(room);return;}
-   if(room.move&&room.move.seq===online.seq&&room.move.id!==online.seenMoveId){
+   if(room.move&&room.move.seq===online.seq&&(!Number.isInteger(room.move.round)||room.move.round===room.round)&&room.move.id!==online.seenMoveId){
     if(room.move.by===online.uid){
      // A reload can abandon an already-accepted shot. Re-run the exact shot
      // from the last committed board and publish it rather than soft-locking.
@@ -1074,13 +1099,24 @@ function handleOnlineRoom(room,meta={}){
 }
 function enterOnlineSnapshot(room){
  if(!room?.game||!online.active)return;
+ // Validate ownership and per-round deck provenance before accepting a board.
+ const seatUids=room.game.teamUids,seatDecks=room.game.teamDecks;
+ if((seatUids&&(seatUids[0]!==room.hostUid||seatUids[1]!==room.guestUid))||
+    (seatDecks&&(JSON.stringify(seatDecks[0])!==JSON.stringify(room.hostReveal?.deck)||
+                  JSON.stringify(seatDecks[1])!==JSON.stringify(room.guestReveal?.deck)))){
+  showNetworkStatus('チームとデッキの対応に不整合があります。部屋に入り直してください。','error');return;
+ }
  cancelAsync();st.fx=[];st.texts=[];st.flash=0;st.shake=0;st.hitstop=0;st.acc=0;st.moving=0;st.still=0;st.vortexPlayed=false;st._impactTimes=new Map();
  $('suddenOverlay').classList.add('hidden');$('suddenOverlay').setAttribute('aria-hidden','true');
  try{st.world=P.unpackWorld(room.game)}catch(e){showNetworkStatus('盤面の読み込みに失敗しました。再読み込みしてください。','error');return;}
+ if(room.seq===0&&!room.move&&!P.initialTeamDecksMatch(st.world,[room.hostReveal.deck,room.guestReveal.deck])){
+  showNetworkStatus('初期盤面のチーム配置が一致しません。部屋に入り直してください。','error');return;
+ }
  st.names=[room.hostName,room.guestName];
  st.decks=[room.hostReveal.deck,room.guestReveal.deck];
+ online.slot=room.hostUid===online.uid?0:1; // never derive team from first/turn
  st.turn=room.turn;st.shotCount=room.seq;st.stats=room.stats||freshStats();
- online.seq=room.seq;online.seenMoveId=null;online.ownShotId=null;online.gameReady=true;online.lastFrameStep=0;online.lastFrameId=null;online.frameBusy=false;online.shotSeq=-1;online.remoteBlend=null;
+ online.seq=room.seq;online.seenMoveId=null;online.ownShotId=null;online.gameReady=true;online.lastFrameStep=0;online.lastFrameId=null;online.frameBusy=false;online.shotSeq=-1;online.remoteBlend=null;online.remotePredictAcc=0;online.remoteSinceFrame=0;online.framePromise=null;online.forceFrame=false;
  if(room.stage==='result'){
   st.phase='playing';st.scene='game';finishGame(room.result?.winner??-1);
   return;
@@ -1093,9 +1129,9 @@ function enterOnlineSnapshot(room){
  if(st.world.suddenDeath&&room.seq>0){showEffect('⚠️ サドンデス！ 場外が毎ターン広がる',900);}
 }
 function resumeOwnOnlineMove(move){
- if(!online.active||st.mode!=='online'||!move||move.seq!==online.seq||st.phase!=='playing')return;
+ if(!online.active||st.mode!=='online'||!move||move.seq!==online.seq||(Number.isInteger(move.round)&&move.round!==online.round)||st.phase!=='playing')return;
  const recorded=online.pendingRoom?.liveFrame||window.KanjiOnline?.latest?.liveFrame;
- online.ownShotId=move.id;online.shotSeq=move.seq;
+ online.ownShotId=move.id;online.shotSeq=move.seq;online.forceFrame=true;
  online.frameSentAt=-Infinity;online.frameBusy=false;
  // A reload during a shot must continue from the LATEST accepted server
  // frame, not from the opening board. Otherwise both players watch a rewind.
@@ -1114,67 +1150,102 @@ function resumeOwnOnlineMove(move){
  else {online.ownShotId=null;showNetworkStatus('発射の復旧に失敗しました。もう一度読み込んでください。','error');}
 }
 function replayOnlineMove(move){
- if(st.scene!=='game'||st.phase!=='playing'||move.seq!==online.seq)return;
+ if(st.scene!=='game'||st.phase!=='playing'||move.seq!==online.seq||(Number.isInteger(move.round)&&move.round!==online.round))return;
  online.seenMoveId=move.id;
  const b=st.world.bodies.find(x=>x.id===move.bodyId&&x.alive);
  if(!b){showNetworkStatus('相手の手を同期できません。盤面更新を待っています。','error');st.phase='syncing';return;}
  fireShot(b,move.dx,move.dy,move.power,move.spin,move.spinStrength,true);
  if(move.by!==online.uid){
-  // Physics is simulated by the shooter only. The remote device displays
-  // interpolation of signed-in shooter's snapshots, never a competing result.
+  // The shooter is authoritative. The receiver predicts motion between
+  // confirmed snapshots but never commits or decides the match outcome.
   st.phase='remoteStream';st.acc=0;st.hitstop=0;st.moving=0;
+  online.remotePredictAcc=0;online.remoteSinceFrame=0;online.remoteBlend=null;online.remoteImpactTimes.clear();
  }
  showNetworkStatus('相手の盤面を受信中…','pending');
 }
-// Every ~650ms publish an authoritative in-flight picture of the board.
+// Every ~450ms publish an authoritative in-flight picture of the board.
 // No extra Firestore writes when nobody is moving, outside an actual shot,
 // or while a previous frame is still being sent.
 function sendLiveFrame(){
  if(st.mode!=='online'||!online.active||!online.ownShotId||online.publishing||online.frameBusy||st.phase!=='moving')return;
- const now=performance.now();if(now-online.frameSentAt<650)return;
- online.frameBusy=true;online.frameSentAt=now;
+ const now=performance.now();if(now-online.frameSentAt<(online.forceFrame?80:450))return;
+ online.forceFrame=false;online.frameBusy=true;online.frameSentAt=now;
  const id=online.ownShotId,seq=online.shotSeq,step=++online.frameStep;
  const snapshot=P.packWorld(st.world);
- window.KanjiOnline.pushFrame(id,seq,step,snapshot)
-  .catch(()=>{/* Keep playing; the final transactional state is authoritative. */})
-  .finally(()=>{if(online.ownShotId===id)online.frameBusy=false;});
+ const pending=window.KanjiOnline.pushFrame(id,seq,step,snapshot,online.round)
+  .catch(()=>{/* Final transactional snapshot remains authoritative. */});
+ online.framePromise=pending;
+ pending.finally(()=>{if(online.framePromise===pending)online.framePromise=null;
+  if(online.ownShotId===id)online.frameBusy=false;});
 }
 function applyRemoteFrame(room){
  const frame=room.liveFrame,move=room.move;
- if(!frame||!move||frame.id!==move.id||frame.seq!==online.seq||move.by===online.uid)return;
+ if(!frame||!move||frame.id!==move.id||frame.seq!==online.seq||move.by===online.uid||
+  (Number.isInteger(frame.round)&&frame.round!==online.round))return;
  if(online.lastFrameId===frame.id&&frame.step<=online.lastFrameStep)return;
  if(st.scene!=='game'||!['moving','remoteStream','syncing'].includes(st.phase))return;
  try{
   const w=P.unpackWorld(frame.world);
-  const oldById=new Map((st.world?.bodies||[]).filter(b=>b.alive).map(b=>[b.id,{x:b.x,y:b.y,angle:b.angle}]));
-  const blend=[];
+  // Do not mutate the received authoritative world for visual interpolation: 
+  // otherwise subsequent predictive physics starts from stale interpolated coordinates.
+  const oldWorld=st.world;
+  const oldById=new Map((oldWorld?.bodies||[]).filter(b=>b.alive).map(b=>[b.id,{x:b.x,y:b.y,angle:b.angle,burstStage:b.burstStage}]));
+  // Only confirmed ability activations trigger the receiver's large VFX.
+  if(w.vortices.length&&!(oldWorld?.vortices.length)){
+   const v=w.vortices[0];addRing(v.center.x,v.center.y,'#a875ed',v.range);
+   addParticles(v.center.x,v.center.y,26,'#9c78ef',1.1);sound('shock');
+  }
+  if(w.magnets.length&&!(oldWorld?.magnets.length)){
+   const m=w.magnets[0];addRing(m.center.x,m.center.y,'#6adacb',m.range);
+   addParticles(m.center.x,m.center.y,40,'#87ffdb',1.2);sound('shock');
+  }
   for(const b of w.bodies){
    const before=oldById.get(b.id);
-   if(!before||Math.hypot(before.x-b.x,before.y-b.y)>240)continue;
-   blend.push({body:b,from:before,to:{x:b.x,y:b.y,angle:b.angle}});
-   b.x=before.x;b.y=before.y;b.angle=before.angle;
+   if(b.burstStage==='homing'&&before?.burstStage!=='homing'){
+    addRing(b.x,b.y,'#e75552',115);showText('暴走開始!!',b.x,b.y,'#f9a36d');sound('burst');
+   }
   }
-  online.remoteBlend={start:performance.now(),duration:620,items:blend};
+  const offsets=new Map();
+  for(const b of w.bodies){
+   const before=oldById.get(b.id);if(!before)continue;
+   const dx=before.x-b.x,dy=before.y-b.y;
+   if(Math.hypot(dx,dy)>115)continue; // large divergence: authoritative snap instead
+   offsets.set(b.id,{dx,dy,da:Math.atan2(Math.sin(before.angle-b.angle),Math.cos(before.angle-b.angle))});
+  }
+  online.remoteBlend={start:performance.now(),duration:135,offsets};
   st.world=w;st.shotCount=room.seq+1;st.turn=room.turn;
+  online.remotePredictAcc=0;online.remoteSinceFrame=0;
   st.phase='remoteStream';st.hitstop=0;st.acc=0;st.moving=0;st.still=0;st.drag=null;
   online.lastFrameId=frame.id;online.lastFrameStep=frame.step;
   updateHud();updateFieldStatus();
   showNetworkStatus('相手の盤面を同期表示中…','pending');
  }catch(e){showNetworkStatus('途中経過の同期を再試行中…','pending');}
 }
-// Smooth 650ms authoritative packet updates without running a second,
-// potentially divergent physics simulation on the receiving device.
-function updateRemoteBlend(ts){
- const blend=online.remoteBlend;if(!blend)return;
- const a=clamp((ts-blend.start)/blend.duration,0,1);
- const t=a*a*(3-2*a);
- for(const item of blend.items){
-  const {body,from,to}=item;
-  body.x=from.x+(to.x-from.x)*t;body.y=from.y+(to.y-from.y)*t;
-  const da=Math.atan2(Math.sin(to.angle-from.angle),Math.cos(to.angle-from.angle));
-  body.angle=from.angle+da*t;
+// Between authoritative frames, replay actual physics with fixed time steps.
+// This preserves curved Vortex paths and homing Burst instead of linearizing them.
+// Receiver prediction is display-only; it never publishes turns or results.
+function tickRemoteStream(dt){
+ online.remoteSinceFrame+=Math.min(dt,.08);
+ if(online.remoteSinceFrame>1.15)return; // freeze if the connection stalls
+ online.remotePredictAcc=Math.min(.20,online.remotePredictAcc+Math.min(dt,.05));
+ const w=st.world;if(!w)return;
+ let steps=0;
+ const hooks={
+  merge:(a,b)=>P.createMerged(w,a,b),
+  impact:({a,b,p,speed})=>{
+   if(a.static||b.static||a.owner===b.owner)return;
+   const key=[a.id,b.id].sort((x,y)=>x-y).join('_'),now=performance.now();
+   if(now-(online.remoteImpactTimes.get(key)||-9999)<110)return;
+   online.remoteImpactTimes.set(key,now);
+   const shooter=a.id===w.shooterId?a:b.id===w.shooterId?b:null;
+   if(!w.preparation&&shooter?.ability==='giant')P.growGiant(w,shooter);
+   if(speed>165){addParticles(p.x,p.y,Math.min(10,Math.round(speed/65)),'#fbda92',.7);}
+  }
+ };
+ while(online.remotePredictAcc>=1/120&&steps<8){
+  P.step(w,1/120,hooks);online.remotePredictAcc-=1/120;steps++;
  }
- if(a>=1)online.remoteBlend=null;
+ if(online.remoteBlend&&performance.now()-online.remoteBlend.start>=online.remoteBlend.duration)online.remoteBlend=null;
 }
 function publishOnlineTurn(){
  if(!online.active||!online.ownShotId||online.publishing)return;
@@ -1184,7 +1255,11 @@ function publishOnlineTurn(){
  online.publishing=true;
  let attempts=0;
  async function send(){
-  try{await window.KanjiOnline.finishShot(id,snapshot,turn,stats,result);online.publishing=false;}
+  try{
+   // A late in-flight frame must never overwrite a just-committed final board.
+   if(online.framePromise)await online.framePromise;
+   await window.KanjiOnline.finishShot(id,snapshot,turn,stats,result);online.publishing=false;
+  }
   catch(e){const done=window.KanjiOnline?.latest;
    if(done&&done.seq>online.shotSeq){online.publishing=false;return;}
    if(++attempts<=3&&online.active){showNetworkStatus('送信を再試行しています…','pending');setTimeout(send,1400*attempts)}

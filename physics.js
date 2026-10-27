@@ -1,4 +1,4 @@
-/* 漢字おはじき Ver.2.4: dependency-free 2D compound-SAT impulse solver.
+/* 漢字おはじき Ver.2.7.3: dependency-free 2D compound-SAT impulse solver.
    World units: board coordinates 540 x 760. Time: seconds. Clockwise rotation is positive.
    Runs physics at a fixed 1/120 second timestep in game.js, render separately.
 */
@@ -13,7 +13,7 @@ const NORMAL_RESTITUTION=.73;
 const NORMAL_FULL_IMPULSE=(1+NORMAL_RESTITUTION)*FULL_SHOT_SPEED/2;
 const SHOCK_JUMP_PIECES=3, SHOCK_RADIUS_PIECES=1;
 const VORTEX_RADIUS_PIECES=235/PIECE_UNIT;
-const MAGNET_RANGE=235, MAGNET_DURATION=2, RICOCHET_BOOST=1.27, REFLECT_MULTIPLIER=1.0; // Original Ver.1.2 vortex: radius 235 units, enemy-only, two outward turns.
+const MAGNET_RANGE=235, MAGNET_DURATION=2, RICOCHET_BOOST=1.27, REFLECT_MULTIPLIER=1.0; // Vortex affects both teams (excluding source); magnet targets enemies only.
 const SPLIT_SCALES=[1,2/3,1/3];
 // Aim strength changes jump distance smoothly: weak shots ≈0.5 tile, full = 3 tiles.
 function shockJumpPieces(power){return .5+2.5*Math.pow(clamp(power,0,1),1.1)}
@@ -27,7 +27,7 @@ const ABILITY_RULES=[
  {word:'暴走',kind:'追いかける',timing:'止まったあと、いちばん近い相手へ走ります。ぶつかると普通の攻撃です。',numbers:'追いかけ：1秒'},
  {word:'烈風',kind:'吹き飛ばす',timing:'矢印を長く引くほど遠くへジャンプ！ 着地した円の中の全員を外へ飛ばします。',numbers:'ジャンプ：最大3コマ分／着地後半径1コマ分に攻撃'},
  {word:'鉄壁',kind:'守る',timing:'ぶつかる攻撃には強い！ でも烈風と渦巻では普通に動きます。',numbers:'自分が受ける攻撃：0.6倍／円にいる味方：0.7倍／円の広さ：半径3コマ'},
- {word:'渦巻',kind:'敵を渦に巻き込む',timing:'発射して止まると発動。近くの敵だけが外へ広がる渦を2周します（敵への直撃は不要）。',numbers:'時間：2.3秒／範囲：半径約3.8コマ／外向きに拡大'},
+ {word:'渦巻',kind:'周囲を渦に巻き込む',timing:'発射して止まると発動。近くの味方・敵コマを外へ広がる渦に巻き込み、2周させます（渦巻本体は除く）。',numbers:'時間：2.3秒／範囲：半径約3.8コマ／外向きに拡大'},
  {word:'巨大',kind:'大きくなる',timing:'相手に当てるたび大きく、強くなります。最後まで元に戻りません。',numbers:'1回ごと：大きさ1.2倍・攻撃1.1倍／3回まで増加'},
  {word:'一撃',kind:'超強力な攻撃',timing:'最初にぶつかった敵1個だけを特大パワーで飛ばします。次の敵には普通の威力です。',numbers:'最初の敵：通常の攻撃力3倍／クリティカルの場合は5倍／2回目から通常(1ターンリセット)'},
  {word:'分裂',kind:'相手の攻撃で増える',timing:'相手のターンに敵コマと接触すると2個に分裂。自分のターンには発動しません。',numbers:'敵コマから攻撃があった場合、分裂する。分裂は1ターン1回。1個→2個（2/3サイズ）→最大4個（1/3サイズ）'},
@@ -399,21 +399,21 @@ function stepOnce(world,dt,hooks={}){
    b.homingLeft-=dt;
    if(b.homingLeft<=0)b.burstStage='done';
   }
-  // Magnetic attraction applies only to the original enemy list captured at activation.
+  // Magnet remains enemy-only. Increase the attraction's target speed twofold.
   for(const mag of world.magnets){
    const target=mag.targets.includes(b.id);
    if(!target||b.owner===mag.owner)continue;
    const dx=mag.center.x-b.x,dy=mag.center.y-b.y,dist=hypot(dx,dy);
    if(dist<14)continue;
-   const desired=Math.min(680,Math.max(80,(dist-42)*4));
+   const desired=Math.min(1360,Math.max(160,(dist-42)*8));
    const k=Math.min(1,dt*8);
    b.vx+=(dx/dist*desired-b.vx)*k;
    b.vy+=(dy/dist*desired-b.vy)*k;
   }
-  // Original Ver.1.2 vortex: only enemies in range at activation are captured.
-  // No late entrants and no friendly fire from the vortex itself.
+  // Vortex captures BOTH teams in range, excluding its own source tile.
+  // No late entrants; targets are captured at activation.
   for(const v of world.vortices){
-   if(b.owner===v.owner)continue;
+   if(b.id===v.sourceId)continue;
    const t=v.targets.find(t=>t.id===b.id);
    if(!t)continue;
    const phase=clamp(v.age/v.duration,0,1),ang=t.angle+2*Math.PI*2*phase;
@@ -481,7 +481,7 @@ function stepOnce(world,dt,hooks={}){
     const b=bodies[j];if(!b.alive||b.merging||b.jump)continue;
     const m=manifold(a,b);if(!m)continue;
     const rel=hypot(a.vx-b.vx,a.vy-b.vy);
-    if(!a.merged&&!b.merged&&a.word===b.word&&a.text!==b.text&&rel>=55){
+    if(a.owner===b.owner&&!a.merged&&!b.merged&&a.word===b.word&&a.text!==b.text&&rel>=55){
       a.merging=b.merging=true;merges.push([a,b]);break;
     }
     const attacker=a.id===world.shooterId?a:b.id===world.shooterId?b:null;
@@ -579,10 +579,13 @@ function finishTurn(world,owner,allowAbility=true){
 function growGiant(world,b){
  if(!b||!b.alive||b.ability!=='giant'||b.growthStacks>=3||world.time-b.lastGrowthTime<.24)return false;
  b.growthStacks++;b.lastGrowthTime=world.time;
+ // Scale the already-authoritative collision geometry. Different phone fonts
+ // must not cause a giant piece to grow into a different shape mid-match.
+ const oldScale=b.scale||1;
  b.scale=Math.pow(1.2,b.growthStacks);
- const base=shapeFor(b.text);
- b.w=base.w*b.scale;b.h=base.h*b.scale;
- b.parts=base.parts.map(p=>({x:p.x*b.scale,y:p.y*b.scale,w:p.w*b.scale,h:p.h*b.scale}));
+ const factor=b.scale/oldScale;
+ b.w*=factor;b.h*=factor;
+ b.parts=b.parts.map(p=>({x:p.x*factor,y:p.y*factor,w:p.w*factor,h:p.h*factor}));
  b.radius=hypot(b.w,b.h)*.58+6;
  b.mass=2.1;b.invM=1/b.mass;b.invI=12/(b.mass*(b.w*b.w+b.h*b.h));
  b.flash=1;
@@ -636,7 +639,7 @@ function retargetVortices(world,retiredIds,replacement){
  for(const vortex of world.vortices){
   const old=vortex.targets.find(t=>retiredIds.includes(t.id));if(!old)continue;
   vortex.targets=vortex.targets.filter(t=>!retiredIds.includes(t.id));
-  if(!vortex.targets.some(t=>t.id===replacement.id)&&replacement.id!==vortex.sourceId&&replacement.owner!==vortex.owner){
+  if(!vortex.targets.some(t=>t.id===replacement.id)&&replacement.id!==vortex.sourceId){
    vortex.targets.push({id:replacement.id,
     angle:Math.atan2(replacement.y-vortex.center.y,replacement.x-vortex.center.x)-4*Math.PI*vortex.age/vortex.duration,
     radius:Math.max(22,hypot(replacement.x-vortex.center.x,replacement.y-vortex.center.y)-vortex.expand*vortex.age/vortex.duration)});
@@ -648,7 +651,7 @@ function startVortex(world,b){
  if(world.preparation||!b||!b.alive||b.ability!=='vortex'||!b.vortexArmed||b.vortexTriggered)return null;
  b.vortexArmed=false;b.vortexTriggered=true;
  const range=235;
- const targets=world.bodies.filter(p=>p.alive&&p.owner!==b.owner&&hypot(p.x-b.x,p.y-b.y)<=range)
+ const targets=world.bodies.filter(p=>p.alive&&p.id!==b.id&&hypot(p.x-b.x,p.y-b.y)<=range)
  .map(p=>({id:p.id,angle:Math.atan2(p.y-b.y,p.x-b.x),radius:Math.max(28,hypot(p.x-b.x,p.y-b.y))}));
  const v={sourceId:b.id,owner:b.owner,center:{x:b.x,y:b.y},age:0,duration:2.3,expand:95,range,targets};
  world.vortices.push(v);return v;
@@ -703,8 +706,8 @@ function createMerged(world,a,b){
  const mass=a.mass+b.mass;
  const x=(a.x*a.mass+b.x*b.mass)/mass,y=(a.y*a.mass+b.y*b.mass)/mass;
  const vx=(a.vx*a.mass+b.vx*b.mass)/mass,vy=(a.vy*a.mass+b.vy*b.mass)/mass;
- const owner=a.owner===b.owner?a.owner:world.lastShooterOwner;
- const newB=body({x,y,vx,vy,word:a.word,text:a.word,owner,merged:true,angle:0,omega:(a.omega+b.omega)*.28});
+ if(a.owner!==b.owner||a.word!==b.word)throw Error('異なるチームのコマは合体できません');
+ const newB=body({x,y,vx,vy,word:a.word,text:a.word,owner:a.owner,merged:true,angle:0,omega:(a.omega+b.omega)*.28});
  a.alive=b.alive=false;a.merging=b.merging=false;
  // Relax nearby bodies without giving the combined kanji a teleport advantage.
  for(let repeat=0;repeat<9;repeat++){
@@ -812,9 +815,8 @@ function evaluateShot(world, shooter,dir,power,spin){
      else if(!world.preparation&&shooter.ability==='giant')impulse*=Math.pow(1.1,Math.min(3,shooter.growthStacks+1));
     }
     a.vx-=nx*impulse/a.m;a.vy-=ny*impulse/a.m;b.vx+=nx*impulse/b.m;b.vy+=ny*impulse/b.m;
-    if(!a.merged&&!b.merged&&a.word===b.word&&a.text!==b.text&& -rv>55){
-     const winner=a.owner===b.owner?a.owner:shooter.owner;
-     const mergedBody={x:(a.x+b.x)/2,y:(a.y+b.y)/2,vx:(a.vx+b.vx)/2,vy:(a.vy+b.vy)/2,m:2.1,r:43,owner:winner,text:a.word,word:a.word,merged:true,alive:true,src:false};
+    if(a.owner===b.owner&&!a.merged&&!b.merged&&a.word===b.word&&a.text!==b.text&& -rv>55){
+     const mergedBody={x:(a.x+b.x)/2,y:(a.y+b.y)/2,vx:(a.vx+b.vx)/2,vy:(a.vy+b.vy)/2,m:2.1,r:43,owner:a.owner,text:a.word,word:a.word,merged:true,alive:true,src:false};
      a.alive=b.alive=false;bs.push(mergedBody);doneMerges++;}
    }
   }
@@ -843,6 +845,7 @@ function evaluateShot(world, shooter,dir,power,spin){
 function packWorld(world){
  const bKeys=['id','text','word','owner','merged','ability','x','y','vx','vy','angle','omega','mass','invM','invI','w','h','radius','scale','growthStacks','lastGrowthTime','shotDir','parts','burstAge','burstStage','homingLeft','burstFired','shockArmed','vortexArmed','vortexTriggered','strikeSpent','strikeFirstEnemyId','splitTier','attackFactor','splitLockUntil','splitQueued','awakened','awakenAt','alive','shotAt','isLaunched','vortexHitEnemy','wallBoostAt','reflectAt','magnetArmed','magnetTriggered','jump'];
  return {
+  teamUids:Array.isArray(world.teamUids)?[...world.teamUids]:null,teamDecks:Array.isArray(world.teamDecks)?world.teamDecks.map(d=>[...d]):null,
   time:world.time,preparation:world.preparation,prepTurns:world.prepTurns,shotSerial:world.shotSerial,splitUsedShot:world.splitUsedShot,
   gateX:world.gateX,gateY:world.gateY,suddenDeath:world.suddenDeath,suddenTurns:world.suddenTurns,cornerKnockout:!!world.cornerKnockout,
   shooterId:world.shooterId,lastShooterOwner:world.lastShooterOwner,shotTime:world.shotTime,
@@ -858,6 +861,8 @@ function packWorld(world){
 function unpackWorld(snapshot){
  if(!snapshot||!Array.isArray(snapshot.bodies)||snapshot.bodies.length>72)throw Error('盤面データが不正です');
  const w=newWorld();
+ if(Array.isArray(snapshot.teamUids)&&snapshot.teamUids.length===2)w.teamUids=[...snapshot.teamUids];
+ if(Array.isArray(snapshot.teamDecks)&&snapshot.teamDecks.length===2)w.teamDecks=snapshot.teamDecks.map(d=>[...d]);
  for(const key of ['time','preparation','prepTurns','shotSerial','splitUsedShot','gateX','gateY','suddenDeath','suddenTurns','cornerKnockout','shooterId','lastShooterOwner','shotTime']){
   if(snapshot[key]!==undefined)w[key]=snapshot[key];
  }
@@ -897,5 +902,19 @@ function unpackWorld(snapshot){
   .map(m=>({...m,center:{...m.center},targets:[...m.targets]}));
  return w;
 }
-global.KanjiPhysics={packWorld,unpackWorld,W,H,WORDS,PIECE_UNIT,FULL_SHOT_SPEED,NORMAL_FULL_IMPULSE,shockFullImpulse,attackMultiplier,SHOCK_JUMP_PIECES,SHOCK_RADIUS_PIECES,SHOCK_JUMP_SECONDS,shockJumpPieces,shockLanding,VORTEX_RADIUS_PIECES,SPLIT_SCALES,splitPiece,ABILITY_RULES,body,newWorld,spawnInitial,step,fire,settle,remaining,allStopped,createMerged,triggerShock,awakenPiece,shapeFor,manifold,evaluateShot,finishTurn,openArena,sealPracticeArena,setStreakArena,expandGates,CORNER_SIZE,STREAK_CORNER_SIZE,inStreakCornerOut,streakWalls,defenseFactor,fieldPosition,growGiant,startVortex,startMagnet,MAGNET_RANGE,MAGNET_DURATION,RICOCHET_BOOST,REFLECT_MULTIPLIER,clamp};
+function initialTeamDecksMatch(world,decks){
+ if(!Array.isArray(decks)||decks.length!==2||world.bodies.length!==12)return false;
+ for(let owner=0;owner<2;owner++){
+  const wanted=new Map();
+  for(const word of decks[owner]||[])for(const glyph of word){
+   const key=word+':'+glyph;wanted.set(key,(wanted.get(key)||0)+1);
+  }
+  const found=world.bodies.filter(b=>b.alive&&b.owner===owner&&!b.merged);
+  if(found.length!==6)return false;
+  for(const b of found){const key=b.word+':'+b.text;const n=wanted.get(key)||0;if(n===0)return false;wanted.set(key,n-1)}
+  if([...wanted.values()].some(n=>n!==0))return false;
+ }
+ return true;
+}
+global.KanjiPhysics={initialTeamDecksMatch,packWorld,unpackWorld,W,H,WORDS,PIECE_UNIT,FULL_SHOT_SPEED,NORMAL_FULL_IMPULSE,shockFullImpulse,attackMultiplier,SHOCK_JUMP_PIECES,SHOCK_RADIUS_PIECES,SHOCK_JUMP_SECONDS,shockJumpPieces,shockLanding,VORTEX_RADIUS_PIECES,SPLIT_SCALES,splitPiece,ABILITY_RULES,body,newWorld,spawnInitial,step,fire,settle,remaining,allStopped,createMerged,triggerShock,awakenPiece,shapeFor,manifold,evaluateShot,finishTurn,openArena,sealPracticeArena,setStreakArena,expandGates,CORNER_SIZE,STREAK_CORNER_SIZE,inStreakCornerOut,streakWalls,defenseFactor,fieldPosition,growGiant,startVortex,startMagnet,MAGNET_RANGE,MAGNET_DURATION,RICOCHET_BOOST,REFLECT_MULTIPLIER,clamp};
 })(window);
