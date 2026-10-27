@@ -230,3 +230,14 @@ html, body, #app { touch-action: manipulation; }
   user-select: none;
   -webkit-touch-callout: none;
 }
+
+/* Ver.2.7.2: all pieces are pixels painted on the canvas. Prevent WebKit
+   smart-zoom on the canvas and its non-interactive overlay descendants.
+   Normal site text remains pinch-zoomable for accessibility. */
+#gameScene #boardWrap, #gameScene #boardWrap *, #practiceBoard {
+  touch-action: none !important;
+  -ms-touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}

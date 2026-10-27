@@ -1233,17 +1233,37 @@ $('spinLeft').addEventListener('click',()=>{st.spin=-1;$('spinLeft').classList.a
 // Capturing at scene level preserves the drag if a finger crosses its edge.
 window.addEventListener('pointerdown',secondFingerCancel,{capture:true,passive:false});
 
-// Ver.2.7.1: iOS/Android double-tap-to-zoom fallback for the game interaction surfaces.
-// touch-action is the primary prevention. This guard only cancels a browser gesture
-// on a second quick touch at roughly the same point. Pointer-based shot control stays intact.
+// Ver.2.7.2: prevent iOS Safari smart-zoom when double-tapping a kanji on the canvas.
+// Waiting for the SECOND touchend (the previous fix) can be too late: WebKit may
+// recognize the double-tap before then. Our game pieces live inside a canvas;
+// game movement and long-press inspection use Pointer Events, not synthetic clicks.
+// Cancel browser-native touch gestures as soon as they BEGIN on the playing field.
+// Do not cancel native touches on overlay buttons (e.g. the piece-info close button).
 (function preventAccidentalMatchZoom(){
- const regions=[$('gameScene'),$('practiceBoard')];
+ const interactive='button,input,select,textarea,a,label';
+ const gameScene=$('gameScene'),practice=$('practiceBoard');
+ const surfaces=[$('boardWrap'),practice];
+ const stopNativeGesture=event=>{
+  if(event.target.closest?.(interactive))return;
+  if(event.cancelable)event.preventDefault();
+ };
+ for(const surface of surfaces){
+  if(!surface)continue;
+  surface.addEventListener('touchstart',stopNativeGesture,{capture:true,passive:false});
+  surface.addEventListener('touchmove',stopNativeGesture,{capture:true,passive:false});
+  surface.addEventListener('dblclick',stopNativeGesture,{capture:true,passive:false});
+  // On Safari, these non-standard events can still initiate a zoom gesture.
+  surface.addEventListener('gesturestart',stopNativeGesture,{capture:true,passive:false});
+  surface.addEventListener('gesturechange',stopNativeGesture,{capture:true,passive:false});
+ }
+ // Preserve the old narrow fallback on non-canvas game UI, where standard buttons
+ // must retain their usual touch/click behavior. This does not affect game aiming.
+ const regions=[gameScene,practice];
  let last={time:0,x:0,y:0,region:null};
  for(const region of regions){
-  region.addEventListener('dblclick',event=>{event.preventDefault();},{capture:true});
   region.addEventListener('touchend',event=>{
    if(event.touches.length||event.changedTouches.length!==1){last.time=0;return;}
-   if(event.target.closest?.('button, input, select, textarea, a, label')){last.time=0;return;}
+   if(event.target.closest?.(interactive)){last.time=0;return;}
    const touch=event.changedTouches[0],now=performance.now();
    const doubleTap=last.region===region && now-last.time<310 &&
     Math.hypot(touch.clientX-last.x,touch.clientY-last.y)<28;
