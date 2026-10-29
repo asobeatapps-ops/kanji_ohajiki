@@ -1,4 +1,4 @@
-/* 漢字おはじき Ver.2.7.3: dependency-free 2D compound-SAT impulse solver.
+/* 漢字おはじき Ver.2.7.4: dependency-free 2D compound-SAT impulse solver.
    World units: board coordinates 540 x 760. Time: seconds. Clockwise rotation is positive.
    Runs physics at a fixed 1/120 second timestep in game.js, render separately.
 */
@@ -845,7 +845,11 @@ function evaluateShot(world, shooter,dir,power,spin){
 function packWorld(world){
  const bKeys=['id','text','word','owner','merged','ability','x','y','vx','vy','angle','omega','mass','invM','invI','w','h','radius','scale','growthStacks','lastGrowthTime','shotDir','parts','burstAge','burstStage','homingLeft','burstFired','shockArmed','vortexArmed','vortexTriggered','strikeSpent','strikeFirstEnemyId','splitTier','attackFactor','splitLockUntil','splitQueued','awakened','awakenAt','alive','shotAt','isLaunched','vortexHitEnemy','wallBoostAt','reflectAt','magnetArmed','magnetTriggered','jump'];
  return {
-  teamUids:Array.isArray(world.teamUids)?[...world.teamUids]:null,teamDecks:Array.isArray(world.teamDecks)?world.teamDecks.map(d=>[...d]):null,
+  teamUids:Array.isArray(world.teamUids)?[...world.teamUids]:null,
+  // Firestore rejects direct nested arrays (e.g. [[blue...],[red...]]).
+  // Use a MAP of lists over the wire; keep the internal 2D deck array unchanged.
+  teamDecks:Array.isArray(world.teamDecks)&&world.teamDecks.length===2
+   ? {blue:[...world.teamDecks[0]],red:[...world.teamDecks[1]]} : null,
   time:world.time,preparation:world.preparation,prepTurns:world.prepTurns,shotSerial:world.shotSerial,splitUsedShot:world.splitUsedShot,
   gateX:world.gateX,gateY:world.gateY,suddenDeath:world.suddenDeath,suddenTurns:world.suddenTurns,cornerKnockout:!!world.cornerKnockout,
   shooterId:world.shooterId,lastShooterOwner:world.lastShooterOwner,shotTime:world.shotTime,
@@ -862,7 +866,14 @@ function unpackWorld(snapshot){
  if(!snapshot||!Array.isArray(snapshot.bodies)||snapshot.bodies.length>72)throw Error('盤面データが不正です');
  const w=newWorld();
  if(Array.isArray(snapshot.teamUids)&&snapshot.teamUids.length===2)w.teamUids=[...snapshot.teamUids];
- if(Array.isArray(snapshot.teamDecks)&&snapshot.teamDecks.length===2)w.teamDecks=snapshot.teamDecks.map(d=>[...d]);
+ // Accept the new Firestore-safe map and legacy in-memory snapshots.
+ const packedDecks=snapshot.teamDecks;
+ if(packedDecks&&typeof packedDecks==='object'&&!Array.isArray(packedDecks)
+   &&Array.isArray(packedDecks.blue)&&Array.isArray(packedDecks.red)){
+  w.teamDecks=[[...packedDecks.blue],[...packedDecks.red]];
+ }else if(Array.isArray(packedDecks)&&packedDecks.length===2&&packedDecks.every(Array.isArray)){
+  w.teamDecks=packedDecks.map(d=>[...d]);
+ }
  for(const key of ['time','preparation','prepTurns','shotSerial','splitUsedShot','gateX','gateY','suddenDeath','suddenTurns','cornerKnockout','shooterId','lastShooterOwner','shotTime']){
   if(snapshot[key]!==undefined)w[key]=snapshot[key];
  }

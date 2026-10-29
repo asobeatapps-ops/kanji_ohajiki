@@ -1,4 +1,4 @@
-/* 漢字おはじき Ver.2.7.3 — authoritative shooter snapshots.
+/* 漢字おはじき Ver.2.7.4 — authoritative shooter snapshots.
    The shooter's physics is authoritative. During an active shot, lightweight
    periodic snapshots prevent cross-device font/physics drift. Turn-end state
    is committed in a Firestore transaction. Server-side game anti-cheat is NOT supplied. */
@@ -72,6 +72,18 @@ async function connect(code,name){
  }catch{}
  listen();return {role,uid,roomId};
 }
+// Catch unsupported Firestore values locally instead of leaving players stuck
+// at the deck-confirmation screen with a generic SDK exception.
+function assertFirestoreCompatible(value,path='game'){
+ if(Array.isArray(value)){
+  for(let i=0;i<value.length;i++){
+   if(Array.isArray(value[i]))throw Error('同期データに入れ子の配列があります: '+path+'['+i+']');
+   assertFirestoreCompatible(value[i],path+'['+i+']');
+  }
+ }else if(value&&typeof value==='object'){
+  for(const [key,item] of Object.entries(value))assertFirestoreCompatible(item,path+'.'+key);
+ }
+}
 function assertConnected(){if(!roomRef||!role||!playerUid)throw Error('合言葉の部屋へ接続していません');}
 const ownKey=(host,guest)=>role==='host'?host:guest;
 async function commitDeck(deck){
@@ -105,6 +117,7 @@ async function verifyDecks(room){
 }
 async function startRound(snapshot,first,round){
  assertConnected();if(role!=='host')return;
+ assertFirestoreCompatible(snapshot);
  await runTransaction(db,async tx=>{
   const snap=await tx.get(roomRef),d=snap.data();
   if(!d||d.stage!=='reveal'||!d.hostReveal||!d.guestReveal||d.round!==round)return;
@@ -125,12 +138,12 @@ async function sendShot(move){
 // Approximately 2.2 snapshots/sec per ongoing shot. Old/stale frames are ignored by
 // the receiving client and (with production rules) rejected after shot completion.
 async function pushFrame(shotId,seq,step,snapshot,round){
- assertConnected();
+ assertConnected();assertFirestoreCompatible(snapshot);
  if(!Number.isInteger(step)||step<1||step>10000)throw Error('同期番号が不正です');
  await updateDoc(roomRef,{liveFrame:{id:shotId,seq,step,round,world:snapshot},updatedAt:serverTimestamp()});
 }
 async function finishShot(shotId,snapshot,turn,stats,result){
- assertConnected();await runTransaction(db,async tx=>{
+ assertConnected();assertFirestoreCompatible(snapshot);await runTransaction(db,async tx=>{
   const snap=await tx.get(roomRef),d=snap.data();
   if(!d||d.stage!=='playing'||!d.move||d.move.id!==shotId||d.move.by!==playerUid)throw Error('この手はすでに処理済みです');
   tx.update(roomRef,{move:null,liveFrame:null,game:snapshot,turn,stats,seq:d.seq+1,

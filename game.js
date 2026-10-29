@@ -1,4 +1,4 @@
-/* 漢字おはじき Ver.2.7.3 | ASOBEAT — cross-device layout / authoritative snapshots */
+/* 漢字おはじき Ver.2.7.4 | ASOBEAT — cross-device layout / authoritative snapshots */
 (function(){'use strict';
 const P=window.KanjiPhysics;if(!P){document.body.textContent='物理エンジンを読み込めませんでした。';return;}
 const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'停止後1秒・敵を自動追尾','烈風':'引く強さで0.5〜3コマジャンプ・着地後に衝撃波','鉄壁':'ぶつかる攻撃を軽減（能力は普通に受ける）','渦巻':'停止後、半径約3.8コマ内の敵味方を2.3秒で2周（自身を除く）','巨大':'命中で1.2倍巨大化（最大3回）','一撃':'最初の敵だけ3倍！角なら5倍！','分裂':'相手のターンに接触で分裂・1ターン1回','跳弾':'自ターンの壁衝突で加速（操作していなくても発動）','磁力':'停止後、渦巻と同じ範囲の敵だけを2秒間引き寄せ','反射':'敵がぶつかったら、受けた衝撃の100%を相手に返す'};
@@ -1100,8 +1100,12 @@ function handleOnlineRoom(room,meta={}){
 function enterOnlineSnapshot(room){
  if(!room?.game||!online.active)return;
  // Validate ownership and per-round deck provenance before accepting a board.
- const seatUids=room.game.teamUids,seatDecks=room.game.teamDecks;
+ const seatUids=room.game.teamUids;
+ const packedDecks=room.game.teamDecks;
+ const seatDecks=packedDecks&&Array.isArray(packedDecks.blue)&&Array.isArray(packedDecks.red)
+  ? [packedDecks.blue,packedDecks.red] : Array.isArray(packedDecks)?packedDecks:null;
  if((seatUids&&(seatUids[0]!==room.hostUid||seatUids[1]!==room.guestUid))||
+    (packedDecks&&!seatDecks)||
     (seatDecks&&(JSON.stringify(seatDecks[0])!==JSON.stringify(room.hostReveal?.deck)||
                   JSON.stringify(seatDecks[1])!==JSON.stringify(room.guestReveal?.deck)))){
   showNetworkStatus('チームとデッキの対応に不整合があります。部屋に入り直してください。','error');return;
