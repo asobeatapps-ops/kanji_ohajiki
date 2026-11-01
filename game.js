@@ -1,4 +1,4 @@
-/* 漢字おはじき Ver.2.7.4 | ASOBEAT — cross-device layout / authoritative snapshots */
+/* 漢字おはじき Ver.2.7.5 | ASOBEAT — cross-device layout / authoritative snapshots */
 (function(){'use strict';
 const P=window.KanjiPhysics;if(!P){document.body.textContent='物理エンジンを読み込めませんでした。';return;}
 const WORDS=Object.keys(P.WORDS),DESCRIPTIONS={'暴走':'停止後1秒・敵を自動追尾','烈風':'引く強さで0.5〜3コマジャンプ・着地後に衝撃波','鉄壁':'ぶつかる攻撃を軽減（能力は普通に受ける）','渦巻':'停止後、半径約3.8コマ内の敵味方を2.3秒で2周（自身を除く）','巨大':'命中で1.2倍巨大化（最大3回）','一撃':'最初の敵だけ3倍！角なら5倍！','分裂':'相手のターンに接触で分裂・1ターン1回','跳弾':'自ターンの壁衝突で加速（操作していなくても発動）','磁力':'停止後、渦巻と同じ範囲の敵だけを2秒間引き寄せ','反射':'敵がぶつかったら、受けた衝撃の100%を相手に返す'};
@@ -25,7 +25,7 @@ const scenes=['home','streak','match','onlineDeck','setup','confirm','game','res
 const st={scene:'home',mode:'solo',diff:'normal',decks:[['暴走','烈風','鉄壁'],['烈風','鉄壁','暴走']],names:['青チーム','CPU'],world:null,phase:'title',turn:0,spin:1,drag:null,selected:null,fx:[],texts:[],bannerUntil:0,shake:0,flash:0,hitstop:0,time:0,acc:0,moving:0,still:0,shotCount:0,stats:{outs:[0,0],merges:[0,0],crits:[0,0],awakens:[0,0]},vortexPlayed:false,magnetPlayed:false,turnToken:0,sound:true,result:null,geom:null,streakWins:0,streakWord:'暴走',streakNextWord:null};
 let audio=null,noiseBuffer=null,animLast=0,rafId=0;let timers=[];
 let phaseNoticeTimer=null,infoTimer=null,holdPiece=null,suppressAimUp=null;
-const online={active:false,role:null,uid:null,slot:null,round:0,seq:-1,seenMoveId:null,ownShotId:null,starting:false,revealing:false,publishing:false,resetting:false,committed:false,rematch:false,gameReady:false,pendingRoom:null,lastError:'',frameStep:0,frameSentAt:0,frameBusy:false,lastFrameStep:0,lastFrameId:null,shotSeq:-1,frameWarningAt:0,remoteBlend:null,remotePredictAcc:0,remoteSinceFrame:0,framePromise:null,forceFrame:false,remoteImpactTimes:new Map()};
+const online={active:false,role:null,uid:null,slot:null,round:0,seq:-1,seenMoveId:null,ownShotId:null,starting:false,revealing:false,publishing:false,resetting:false,committed:false,rematch:false,gameReady:false,pendingRoom:null,lastError:'',frameStep:0,frameSentAt:0,frameBusy:false,lastFrameStep:0,lastFrameId:null,shotSeq:-1,frameWarningAt:0,remoteBlend:null,remotePredictAcc:0,remoteSinceFrame:0,framePromise:null,forceFrame:false,remoteImpactTimes:new Map(),replay:null,replayStarting:false};
 let onlineDeck=['暴走','烈風','鉄壁'];
 try{let prior=JSON.parse(localStorage.getItem('asobeat_kanji_online_deck')||'null');if(Array.isArray(prior)&&prior.length===3&&prior.every(w=>WORDS.includes(w)||(w==='衝撃'||w==='爆風'||w==='暴風')))onlineDeck=prior.map(w=>(w==='衝撃'||w==='爆風'||w==='暴風')?'烈風':w)}catch{}
 
@@ -282,13 +282,28 @@ function fireShot(b,dirX,dirY,power,spin,spinStrength=1,fromNetwork=false){
   if(st.phase!=='playing'||!b||!b.alive||b.owner!==online.slot||st.turn!==online.slot)return false;
   if(!window.KanjiOnline){showNetworkStatus('Firebaseの読み込みを確認してください','error');return false;}
   const len=Math.hypot(dirX,dirY);if(len<.01||power<.06)return false;
-  const move={bodyId:b.id,dx:dirX/len,dy:dirY/len,power,spin,spinStrength};
-  st.phase='sending';showNetworkStatus('発射情報を相手へ送っています…','pending');
-  window.KanjiOnline.sendShot(move).then(shot=>{
-   if(st.mode!=='online'||!online.active)return;
-   online.ownShotId=shot.id;online.seenMoveId=shot.id;online.forceFrame=true;
-   st.phase='playing';online.shotSeq=shot.seq;online.frameStep=0;online.frameSentAt=-Infinity;online.frameBusy=false;fireShot(b,move.dx,move.dy,power,spin,spinStrength,true);
-  }).catch(e=>{st.phase='playing';const msg=networkError(e);showNetworkStatus(msg,'error');toast(msg)});
+  const move={bodyId:b.id,dx:dirX/len,dy:dirY/len,power,spin,spinStrength,replayVersion:1};
+  st.phase='sending';showNetworkStatus('軌道と火花エフェクトを計算しています…','pending');
+  let accepted=false;
+  (async()=>{
+   // Preflight the ENTIRE shot before submitting any Firestore transaction.
+   // Errors in simulation/size therefore cannot strand a room in a half-shot.
+   const payload=createShotReplay(move);
+   if(!online.active||st.mode!=='online')return;
+   const shot=await window.KanjiOnline.sendShot(move);accepted=true;
+   if(!online.active||st.mode!=='online')return;
+   online.ownShotId=shot.id;online.seenMoveId=shot.id;online.shotSeq=shot.seq;
+   const packet=JSON.parse(payload);packet.playAt=Date.now()+1450;
+   const data=JSON.stringify(packet);
+   showNetworkStatus('両端末へ滑らかな再生データを転送中…','pending');
+   await postReplayFrameWithRetry(shot.id,shot.seq,data,online.round);
+   if(!online.active||online.ownShotId!==shot.id)return;
+   beginShotReplay(data,'self',shot.id);
+  })().catch(e=>{
+   const msg=networkError(e);showNetworkStatus(msg,'error');toast(msg);
+   if(!accepted){st.phase='playing';online.ownShotId=null;}
+   else{st.phase='syncing';showNetworkStatus('再生データを送信できませんでした。通信復旧後に画面を再読み込みしてください：'+msg,'error');}
+  });
   return true;
  }
  if(st.phase!=='playing'||!b||!b.alive||b.owner!==st.turn)return false;
@@ -319,7 +334,8 @@ function collisionHooks(){return {
   st._impactTimes||=new Map();if((st.world.time-(st._impactTimes.get(key)||-99))<.11)return;
   st._impactTimes.set(key,st.world.time);
   const big=speed>165;
-  if(big){addParticles(p.x,p.y,Math.min(18,Math.round(speed/45)),'#fbda92',speed/330);st.shake=Math.max(st.shake,clamp(speed/100,1.5,7.5));}
+  if(speed>=80)addImpactSparks(p.x,p.y,speed);
+  if(big)st.shake=Math.max(st.shake,clamp(speed/100,1.5,7.5));
   if(!st.world.preparation&&shooter&&a.owner!==b.owner&&!a.static&&!b.static){
     if(shooter.ability==='giant'&&P.growGiant(st.world,shooter)){
      addRing(shooter.x,shooter.y,'#eac864',shooter.radius*1.7);addParticles(shooter.x,shooter.y,23,'#ffd774',1.3);
@@ -644,14 +660,28 @@ function secondFingerCancel(e){
  toast('2本指タップで発射をキャンセル');
 }
 
+// Deterministic golden collision sparks. Applied to ALL combat modes. Online
+// playbacks use a recorded collision index as the seed; particle directions
+// are then reproducible on both phones and never affect the physics world.
+function seededRandom(seed){let n=seed>>>0;return ()=>{n=(n+0x6D2B79F5)>>>0;let v=Math.imul(n^(n>>>15),1|n);v^=v+Math.imul(v^(v>>>7),61|v);return ((v^(v>>>14))>>>0)/4294967296}}
+function addImpactSparks(x,y,speed,seed=null){
+ const random=seed===null?Math.random:seededRandom(seed);
+ const count=Math.max(5,Math.min(24,Math.round(5+speed/48)));
+ const kick=Math.min(1.9,.65+speed/420);
+ for(let i=0;i<count&&st.fx.length<260;i++){
+  const theta=random()*TAU,velocity=(90+random()*360)*kick;
+  st.fx.push({type:'contactSpark',x,y,vx:Math.cos(theta)*velocity,vy:Math.sin(theta)*velocity,
+   r:1.4+random()*2.6,t:0,life:.16+random()*.29,color:i%4===0?'#ffffff':i%3===0?'#ff9e3b':'#ffe19a'});
+ }
+}
 function addRing(x,y,color='#e7c384',size=80){st.fx.push({type:'ring',x,y,color,r:5,max:size,t:0,life:.44})}
-function addParticles(x,y,count,color,energy=1){for(let i=0;i<count&&st.fx.length<260;i++){
- const theta=Math.random()*TAU,speed=(70+Math.random()*245)*energy;
- st.fx.push({type:'spark',x,y,vx:Math.cos(theta)*speed,vy:Math.sin(theta)*speed,r:1.4+Math.random()*3.3,t:0,life:.26+Math.random()*.45,color})
+function addParticles(x,y,count,color,energy=1,seed=null){const random=seed===null?Math.random:seededRandom(seed);for(let i=0;i<count&&st.fx.length<260;i++){
+ const theta=random()*TAU,speed=(70+random()*245)*energy;
+ st.fx.push({type:'spark',x,y,vx:Math.cos(theta)*speed,vy:Math.sin(theta)*speed,r:1.4+random()*3.3,t:0,life:.26+random()*.45,color})
  }}
 function showText(str,x,y,color){st.texts.push({str,x,y,color,t:0,life:1.05})}
 function showEffect(str,duration=800){const b=$('effectBanner');b.textContent=str;b.classList.remove('hidden');b.style.animation='none';void b.offsetWidth;b.style.animation='';st.bannerUntil=st.time+duration/1000}
-function renderFx(dt){for(let i=st.fx.length-1;i>=0;i--){const e=st.fx[i];e.t+=dt;if(e.type==='spark'){e.x+=e.vx*dt;e.y+=e.vy*dt;e.vx*=Math.exp(-3*dt);e.vy*=Math.exp(-3*dt)}if(e.t>e.life)st.fx.splice(i,1)}
+function renderFx(dt){for(let i=st.fx.length-1;i>=0;i--){const e=st.fx[i];e.t+=dt;if(e.type==='spark'||e.type==='contactSpark'){e.x+=e.vx*dt;e.y+=e.vy*dt;e.vx*=Math.exp(-3*dt);e.vy*=Math.exp(-3*dt)}if(e.t>e.life)st.fx.splice(i,1)}
  for(let i=st.texts.length-1;i>=0;i--){st.texts[i].t+=dt;if(st.texts[i].t>st.texts[i].life)st.texts.splice(i,1)}
  st.shake=Math.max(0,st.shake-24*dt);st.flash=Math.max(0,st.flash-2.1*dt);
  if(st.bannerUntil&&st.time>=st.bannerUntil){$('effectBanner').classList.add('hidden');st.bannerUntil=0}
@@ -890,6 +920,12 @@ function drawOverlays(context=ctx,world=st.world,effects=st.fx,texts=st.texts){c
  }
  for(const e of effects){const alpha=Math.max(0,1-e.t/e.life);ctx.save();ctx.globalAlpha=alpha;
   if(e.type==='spark'){ctx.fillStyle=e.color;ctx.translate(e.x,e.y);ctx.rotate(e.t*8);ctx.fillRect(-e.r/2,-e.r/2,e.r*2.5,e.r*.9)}
+  if(e.type==='contactSpark'){
+   ctx.lineCap='round';ctx.strokeStyle=e.color;ctx.lineWidth=e.r*Math.max(.4,1-e.t/e.life);
+   ctx.shadowColor='#ffca66';ctx.shadowBlur=10;
+   ctx.beginPath();ctx.moveTo(e.x,e.y);ctx.lineTo(e.x-e.vx*.024,e.y-e.vy*.024);ctx.stroke();
+   ctx.shadowBlur=0;ctx.fillStyle='#fff9d2';ctx.beginPath();ctx.arc(e.x,e.y,e.r*.5,0,TAU);ctx.fill();
+  }
   if(e.type==='ring'){ctx.lineWidth=6*(1-alpha)+1;ctx.strokeStyle=e.color;ctx.beginPath();ctx.arc(e.x,e.y,e.max*(e.t/e.life),0,TAU);ctx.stroke()}
   ctx.restore();
  }
@@ -927,9 +963,219 @@ function paint(dt){if(!st.world||st.scene!=='game')return;
  ctx.restore();
 }
 function mainLoop(ts){let dt=animLast?Math.min(.06,(ts-animLast)/1000):.016;animLast=ts;st.time+=dt;
- if(st.scene==='game'){if(st.phase==='moving'){tickPhysics(dt);if(st.phase==='moving')sendLiveFrame();}if(st.phase==='remoteStream')tickRemoteStream(dt);renderFx(dt);paint(dt)}
+ if(st.scene==='game'){if(st.phase==='moving'){tickPhysics(dt);if(st.phase==='moving')sendLiveFrame();}if(st.phase==='remoteStream')tickRemoteStream(dt);if(st.phase==='replay')tickShotReplay();renderFx(dt);paint(dt)}
  rafId=requestAnimationFrame(mainLoop)
 }
+// ===== Ver.2.7.5: precomputed, shared 60fps battle replay =====
+// Firestore is not a low-latency video transport. The shooter simulates a shot
+// once, including abilities and collisions, then publishes ONE compact replay.
+// Both devices render positions by clock interpolation, never by independently
+// computing contact physics. Events use recorded positions and deterministic
+// spark seeds; this also massively reduces Firestore writes per shot.
+const REPLAY_FPS=60,REPLAY_MAX_BYTES=580000;
+function replayRound(n,places=1){return Math.round(n*10**places)}
+function createShotReplay(move){
+ const startPack=P.packWorld(st.world),world=P.unpackWorld(startPack);
+ const shot=world.bodies.find(b=>b.id===move.bodyId&&b.alive&&b.owner===st.turn);
+ if(!shot)throw Error('発射するコマを再生データ内で確認できません。');
+ const startTime=world.time,events=[],frames=[],defs=new Map(),stats=JSON.parse(JSON.stringify(st.stats));
+ let ticks=0,elapsed=0,still=0,magnetUsed=false,vortexUsed=false,lastBodyCount=0;
+ const impactTimes=new Map();
+ const event=(kind,...details)=>{if(events.length<1500)events.push([Math.max(0,Math.round((world.time-startTime)*1000)),kind,...details])};
+ const discover=()=>{
+  if(lastBodyCount>=world.bodies.length)return;
+  const packed=P.packWorld(world);
+  for(const b of packed.bodies)if(!defs.has(b.id))defs.set(b.id,b);
+  lastBodyCount=world.bodies.length;
+ };
+ const capture=()=>{
+  discover();
+  const bodies=[];
+  for(const b of world.bodies)if(b.alive){
+   bodies.push([b.id,replayRound(b.x),replayRound(b.y),replayRound(b.angle,3),replayRound(b.vx),replayRound(b.vy),replayRound(b.scale,3),replayRound(b.flash,2),b.jump?replayRound(b.jump.age/b.jump.duration,3):-1]);
+  }
+  const shocks=world.shocks.map(s=>[replayRound(s.x),replayRound(s.y),replayRound(s.age,3),replayRound(s.radius),replayRound(s.maxRadius)]);
+  const vortex=world.vortices.map(v=>[v.sourceId,replayRound(v.center.x),replayRound(v.center.y),replayRound(v.age,3),replayRound(v.duration,3),replayRound(v.range),replayRound(v.expand)]);
+  const magnets=world.magnets.map(m=>[m.sourceId,m.owner,replayRound(m.center.x),replayRound(m.center.y),replayRound(m.age,3),replayRound(m.duration,3),replayRound(m.range),m.targets.join(',')]);
+  frames.push([bodies,shocks,vortex,magnets]);
+ };
+ const hooks={
+  impact:({a,b,p,speed,corner,firstStrike})=>{
+   const key=a.static?'w'+b.id:b.static?'w'+a.id:[a.id,b.id].sort((x,y)=>x-y).join('_');
+   if(world.time-(impactTimes.get(key)??-99)<.11)return;
+   impactTimes.set(key,world.time);
+   const shooter=a.id===world.shooterId?a:b.id===world.shooterId?b:null;
+   if(speed>=80)event('i',replayRound(p.x),replayRound(p.y),Math.round(speed));
+   if(!world.preparation&&shooter&&a.owner!==b.owner&&!a.static&&!b.static){
+    if(shooter.ability==='giant'&&P.growGiant(world,shooter))event('g',replayRound(shooter.x),replayRound(shooter.y),shooter.growthStacks);
+    if(shooter.ability==='strike'&&firstStrike&&!corner)event('k',replayRound(p.x),replayRound(p.y));
+   }
+   if(corner&&shooter&&a.owner!==b.owner&&!a.static&&!b.static){
+    stats.crits[shooter.owner]++;event('c',replayRound(p.x),replayRound(p.y),shooter.ability==='strike'&&firstStrike?5:1.2);
+   }
+  },
+  wallBoost:({piece,p})=>event('w',replayRound(p.x),replayRound(p.y)),
+  reflect:({shield,p})=>event('r',replayRound(p.x),replayRound(p.y),replayRound(shield.x),replayRound(shield.y)),
+  merge:(a,b)=>{const m=P.createMerged(world,a,b);stats.merges[m.owner]++;event('m',replayRound(m.x),replayRound(m.y),m.word)},
+  split:(parent)=>event('s',replayRound(parent.x),replayRound(parent.y),parent.owner),
+  out:b=>{stats.outs[1-b.owner]++;event('o',replayRound(b.x),replayRound(b.y),b.owner)},
+  ability:(b,ability)=>{if(ability==='burst')event('b',replayRound(b.x),replayRound(b.y))},
+  shockLand:(b,wave)=>{if(wave)event('l',replayRound(wave.x),replayRound(wave.y))},
+  shockHit:(wave,b,impulse)=>event('h',replayRound(b.x),replayRound(b.y),Math.round(impulse)),
+  awaken:(b)=>{stats.awakens[b.owner]++;event('a',replayRound(b.x),replayRound(b.y),b.text)}
+ };
+ P.fire(world,shot,move.dx,move.dy,move.power,move.spin,move.spinStrength);
+ event('f',replayRound(shot.x),replayRound(shot.y),shot.owner);
+ capture();
+ // A shot may contain follow-on magnet/vortex phases. Preserve the exact
+ // turn-end timing rules without hitstop, which is a visual-only pause.
+ for(ticks=1;ticks<=4800;ticks++){
+  P.step(world,1/120,hooks);elapsed+=1/120;
+  if(ticks%2===0)capture();
+  if(elapsed>.58&&P.allStopped(world))still+=1/120;else still=0;
+  if(still>.48||elapsed>12.5){
+   const shooter=world.bodies.find(b=>b.id===world.shooterId&&b.alive);
+   if(!magnetUsed&&!world.preparation&&shooter?.ability==='magnet'){
+    magnetUsed=true;const m=P.startMagnet(world,shooter);
+    if(m){event('n',replayRound(shooter.x),replayRound(shooter.y));elapsed=0;still=0;continue;}
+   }
+   if(!vortexUsed&&!world.preparation&&shooter?.ability==='vortex'){
+    vortexUsed=true;const v=P.startVortex(world,shooter);
+    if(v){event('v',replayRound(shooter.x),replayRound(shooter.y));elapsed=0;still=0;continue;}
+   }
+   P.settle(world);break;
+  }
+ }
+ if(ticks>=4800)P.settle(world);
+ capture();
+ const packet={v:1,fps:REPLAY_FPS,initial:startPack,defs:[...defs.values()],frames,events,
+  totalMs:Math.round((world.time-startTime)*1000),end:P.packWorld(world),stats};
+ // The replay travels as a string, so JSON's nested arrays cannot trigger
+ // Firestore's "Nested arrays are not supported" validation. Enforce a safe
+ // document size before the accepted shot is submitted to Firebase.
+ let payload=JSON.stringify(packet);
+ if(new TextEncoder().encode(payload).length>REPLAY_MAX_BYTES){
+  packet.frames=packet.frames.filter((_,i)=>i%2===0||i===packet.frames.length-1);
+  packet.fps=30;payload=JSON.stringify(packet);
+  if(new TextEncoder().encode(payload).length>REPLAY_MAX_BYTES){
+   packet.frames=packet.frames.filter((_,i)=>i%2===0||i===packet.frames.length-1);
+   packet.fps=15;payload=JSON.stringify(packet);
+  }
+ }
+ if(new TextEncoder().encode(payload).length>REPLAY_MAX_BYTES)throw Error('このショットの再生データが大きすぎます。別のコマで試してください。');
+ return payload;
+}
+async function postReplayFrameWithRetry(id,seq,data,round){
+ for(let attempt=0;attempt<3;attempt++){
+  try{return await window.KanjiOnline.pushFrame(id,seq,1,{bodies:[],replayData:data},round);}
+  catch(error){
+   // The server may have accepted the write before the acknowledgement was lost.
+   const existing=window.KanjiOnline.latest?.liveFrame;
+   if(existing?.id===id&&existing.world?.replayData===data&&window.KanjiOnline.latestMeta?.pending===false)return;
+   const code=String(error?.code||'');
+   if(attempt===2||(!code.includes('unavailable')&&!code.includes('deadline')&&!code.includes('network')))throw error;
+   await new Promise(resolve=>setTimeout(resolve,(attempt+1)*600));
+  }
+ }
+}
+function fireReplayEvent(ev,index){
+ const [at,kind,x,y,a,b]=ev,px=(x||0)/10,py=(y||0)/10,seed=(((online.seq+1)*1000003+(index+1)*1664525)>>>0);
+ switch(kind){
+  case 'f':addParticles(px,py,10,a===0?'#70c5f7':'#f4a29c',1,seed);st.shake=Math.max(st.shake,2.6);sound('shoot');break;
+  case 'i':addImpactSparks(px,py,a,seed);if(a>165)st.shake=Math.max(st.shake,Math.min(6,a/110));if(a>180)sound('impact',a/300);break;
+  case 'c':addImpactSparks(px,py,500,seed);showText('CRITICAL ×'+a+'!',px,py,'#ffe7ac');st.flash=.18;sound('crit');break;
+  case 'w':addImpactSparks(px,py,430,seed);showText('跳弾 加速!',px,py,'#ffe6a1');sound('crit');break;
+  case 'r':addRing(a/10,b/10,'#a9f3fd',70);showText('反射！ 衝撃を返す',px,py,'#aefaff');sound('crit');break;
+  case 'm':addRing(px,py,'#eaba65',100);addImpactSparks(px,py,450,seed);showText('『'+a+'』合体!!',px,py,'#fff2b9');sound('merge');break;
+  case 's':addRing(px,py,'#eaba65',90);addImpactSparks(px,py,410,seed);showText('分裂！',px,py,'#fff2b9');sound('merge');break;
+  case 'o':addImpactSparks(clamp(px,20,W-20),clamp(py,20,H-20),400,seed);showText('場外!!',clamp(px,25,W-25),clamp(py,25,H-25),'#ffe9bb');sound('out');break;
+  case 'b':addRing(px,py,'#e75552',115);showText('暴走開始!!',px,py,'#f9a36d');sound('burst');break;
+  case 'l':addRing(px,py,'#a7ffff',P.PIECE_UNIT);addImpactSparks(px,py,380,seed);showText('烈風着地！',px,py,'#dcffff');sound('shock');break;
+  case 'h':addImpactSparks(px,py,Math.min(500,a/2),seed);break;
+  case 'g':addRing(px,py,'#eac864',95);showText('巨大化 ×'+a,px,py,'#fff2b4');sound('merge');break;
+  case 'a':addRing(px,py,'#f7c551',135);showText('覚醒！『'+a+'』',px,py,'#fff2b4');sound('awake');break;
+  case 'n':addRing(px,py,'#6adacb',235);showText('磁力！ 強力吸引',px,py,'#b6ffec');sound('shock');break;
+  case 'v':addRing(px,py,'#a875ed',235);showText('渦巻！',px,py,'#d4b6ff');sound('shock');break;
+ }
+}
+function beginShotReplay(payload,source,shotId){
+ let packet;
+ try{packet=JSON.parse(payload);}catch(e){throw Error('ショット再生データを解読できません');}
+ if(packet?.v!==1||!Array.isArray(packet.frames)||packet.frames.length<2||!Array.isArray(packet.defs)
+    ||packet.defs.length>72||!packet.end||!packet.initial||!Array.isArray(packet.events))throw Error('再生データの形式が不正です。');
+ // All participants use the same definitions (shape, scale, kanji) recorded by
+ // the shooter; fonts and CPU speeds cannot change the collision path.
+ const visualPack={...packet.initial,bodies:packet.defs.map(def=>({...def,alive:true}))};
+ const visual=P.unpackWorld(visualPack);
+ const sprites=new Map(visual.bodies.map(b=>[b.id,b]));
+ const originalSizes=new Map(visual.bodies.map(b=>[b.id,{scale:b.scale,w:b.w,h:b.h,radius:b.radius}]));
+ const at=Number(packet.playAt)||Date.now()+350;
+ let clockDelta=at-Date.now();
+ // Some phones use a manually set clock. Keep their replay usable even when
+ // exact absolute-time synchronisation is impossible on such devices.
+ if(!Number.isFinite(clockDelta)||clockDelta>20000||clockDelta< -30000)clockDelta=350;
+ const delay=clamp(clockDelta,-30000,2000);
+ online.replay={packet,source,id:shotId,sprites,originalSizes,started:performance.now()+delay,lastEvent:0,finalRoom:null};
+ online.lastFrameId=shotId;online.lastFrameStep=1;
+ st.world=visual;st.shotCount=online.seq+1;st.selected=null;st.drag=null;st.fx=[];st.texts=[];st.hitstop=0;st.shake=0;st.flash=0;
+ st.phase='replay';online.seenMoveId=shotId;
+ showNetworkStatus(source==='self'?'両端末で同じ演出を再生しています…':'相手のショットを滑らかに再生中…','pending');
+ paintReplayFrame(0);
+}
+function paintReplayFrame(t){
+ const rp=online.replay;if(!rp)return;
+ const packet=rp.packet,frames=packet.frames;
+ // Last appended frame may be shorter than one sampling interval.
+ const idx=Math.min(frames.length-1,Math.max(0,Math.floor(t*packet.fps)));
+ const nextIdx=Math.min(frames.length-1,idx+1),frac=clamp(t*packet.fps-idx,0,1);
+ const [current,shocks,vorts,mags]=frames[idx];
+ const nextBodies=new Map(frames[nextIdx][0].map(b=>[b[0],b]));
+ for(const piece of rp.sprites.values())piece.alive=false;
+ for(const row of current){
+  const piece=rp.sprites.get(row[0]);if(!piece)continue;
+  const next=nextBodies.get(row[0]);const blend=next?frac:0;
+  piece.alive=true;
+  piece.x=(row[1]+(next?next[1]-row[1]:0)*blend)/10;
+  piece.y=(row[2]+(next?next[2]-row[2]:0)*blend)/10;
+  let angleDiff=next?next[3]-row[3]:0;
+  if(angleDiff>3141)angleDiff-=6283;if(angleDiff< -3141)angleDiff+=6283;
+  piece.angle=(row[3]+angleDiff*blend)/1000;
+  piece.vx=(row[4]+(next?next[4]-row[4]:0)*blend)/10;
+  piece.vy=(row[5]+(next?next[5]-row[5]:0)*blend)/10;
+  piece.flash=row[7]/100;
+  const s=row[6]/1000,origin=rp.originalSizes.get(piece.id);
+  if(origin){piece.scale=s;const mult=s/(origin.scale||1);piece.w=origin.w*mult;piece.h=origin.h*mult;piece.radius=origin.radius*mult;}
+  const jumpT=row[8];
+  piece.jump=jumpT>=0?{age:jumpT,duration:1,from:{x:piece.x,y:piece.y},to:{x:piece.x,y:piece.y}}:null;
+ }
+ st.world.shocks=shocks.map(s=>({x:s[0]/10,y:s[1]/10,age:s[2]/1000+(nextIdx!==idx?frac/packet.fps:0),radius:s[3]/10,maxRadius:s[4]/10}));
+ st.world.vortices=vorts.map(v=>({sourceId:v[0],center:{x:v[1]/10,y:v[2]/10},age:v[3]/1000+(nextIdx!==idx?frac/packet.fps:0),duration:v[4]/1000,range:v[5]/10,expand:v[6]/10}));
+ st.world.magnets=mags.map(m=>({sourceId:m[0],owner:m[1],center:{x:m[2]/10,y:m[3]/10},age:m[4]/1000+(nextIdx!==idx?frac/packet.fps:0),duration:m[5]/1000,range:m[6]/10,targets:m[7]?m[7].split(',').map(Number):[]}));
+ const targetMs=t*1000;
+ while(rp.lastEvent<packet.events.length&&packet.events[rp.lastEvent][0]<=targetMs){
+  const index=rp.lastEvent++,ev=packet.events[index];
+  if(targetMs-ev[0]<600)fireReplayEvent(ev,index);
+ }
+}
+function tickShotReplay(){
+ const rp=online.replay;if(!rp||st.phase!=='replay')return;
+ const elapsed=Math.max(0,(performance.now()-rp.started)/1000);
+ paintReplayFrame(elapsed);
+ if(elapsed<Math.max(rp.packet.totalMs/1000,(rp.packet.frames.length-1)/rp.packet.fps))return;
+ // Result state, field updates and victory are still committed by the shooting
+ // client's existing finishShot transaction. The other client never decides.
+ const source=rp.source,finalRoom=rp.finalRoom;
+ st.world=P.unpackWorld(rp.packet.end);st.stats=rp.packet.stats;
+ online.replay=null;
+ st.phase='moving';st.moving=12.5;st.still=1;
+ if(source==='self')finishShot();
+ else{
+  st.phase='syncing';showNetworkStatus('確定した盤面を受信しています…','pending');
+  if(finalRoom)enterOnlineSnapshot(finalRoom);
+  else if(window.KanjiOnline?.latest?.seq>online.seq)enterOnlineSnapshot(window.KanjiOnline.latest);
+ }
+}
+
 // ===== Online mode: matchmaking, hidden deck lock, turn-by-turn sync =====
 const freshStats=()=>({outs:[0,0],merges:[0,0],crits:[0,0],awakens:[0,0]});
 const networkError=e=>window.KanjiOnline?.errorMessage?.(e)||String(e?.message||e||'通信エラー');
@@ -950,7 +1196,7 @@ async function joinOnlineRoom(){
  try{
   st.names[0]=name;save();net.setListener(handleOnlineRoom);
   const connected=await net.connect(code,name);online.active=true;online.role=connected.role;online.uid=connected.uid;
-  online.slot=connected.role==='host'?0:1;online.round=0;online.seq=-1;online.seenMoveId=null;
+  online.slot=connected.role==='host'?0:1;online.round=0;online.seq=-1;online.seenMoveId=null;online.replay=null;online.replayStarting=false;
   online.ownShotId=null;online.starting=false;online.revealing=false;online.publishing=false;online.rematch=false;online.committed=false;online.gameReady=false;online.lastFrameStep=0;online.lastFrameId=null;online.remoteBlend=null;
   $('waitingPanel').classList.remove('hidden');$('roomJoinBtn').classList.add('hidden');
   $('waitingHeadline').textContent='友達の参加を待っています…';
@@ -994,7 +1240,7 @@ async function lockOnlineDeck(){const net=window.KanjiOnline;if(!net||!online.ac
 }
 function resetOnlineViewForRound(round){
  online.round=round;online.seq=-1;online.seenMoveId=null;online.ownShotId=null;
- online.starting=false;online.revealing=false;online.committed=false;online.publishing=false;online.resetting=false;online.rematch=false;online.gameReady=false;online.frameBusy=false;online.lastFrameStep=0;online.lastFrameId=null;online.shotSeq=-1;online.remoteBlend=null;online.remotePredictAcc=0;online.remoteSinceFrame=0;online.framePromise=null;online.forceFrame=false;
+ online.starting=false;online.revealing=false;online.committed=false;online.publishing=false;online.resetting=false;online.rematch=false;online.gameReady=false;online.frameBusy=false;online.lastFrameStep=0;online.lastFrameId=null;online.shotSeq=-1;online.remoteBlend=null;online.remotePredictAcc=0;online.remoteSinceFrame=0;online.framePromise=null;online.forceFrame=false;online.replay=null;online.replayStarting=false;
 }
 function handleOnlineRoom(room,meta={}){
  if(st.mode!=='online'||!online.active)return;
@@ -1014,6 +1260,11 @@ function handleOnlineRoom(room,meta={}){
   else if(st.scene==='result'){$('winnerName').textContent+=' ／ '+msg;}
   else{st.phase='closed';showNetworkStatus(msg,'error');onModal('<p>'+msg+'</p>','対戦が終了しました',true);}
   return;
+ }
+ // Finish a precomputed remote animation even when the shooter has already
+ // committed the turn. Then apply that final authoritative board immediately.
+ if(online.replay?.source==='remote'&&st.phase==='replay'&&room.seq>online.seq){
+  online.replay.finalRoom=room;return;
  }
  if(room.round<online.round)return; // delayed events from a previous match
  if(room.round!==online.round){resetOnlineViewForRound(room.round);}
@@ -1120,7 +1371,7 @@ function enterOnlineSnapshot(room){
  st.decks=[room.hostReveal.deck,room.guestReveal.deck];
  online.slot=room.hostUid===online.uid?0:1; // never derive team from first/turn
  st.turn=room.turn;st.shotCount=room.seq;st.stats=room.stats||freshStats();
- online.seq=room.seq;online.seenMoveId=null;online.ownShotId=null;online.gameReady=true;online.lastFrameStep=0;online.lastFrameId=null;online.frameBusy=false;online.shotSeq=-1;online.remoteBlend=null;online.remotePredictAcc=0;online.remoteSinceFrame=0;online.framePromise=null;online.forceFrame=false;
+ online.seq=room.seq;online.seenMoveId=null;online.ownShotId=null;online.gameReady=true;online.lastFrameStep=0;online.lastFrameId=null;online.frameBusy=false;online.shotSeq=-1;online.remoteBlend=null;online.remotePredictAcc=0;online.remoteSinceFrame=0;online.framePromise=null;online.forceFrame=false;online.replay=null;online.replayStarting=false;
  if(room.stage==='result'){
   st.phase='playing';st.scene='game';finishGame(room.result?.winner??-1);
   return;
@@ -1134,6 +1385,21 @@ function enterOnlineSnapshot(room){
 }
 function resumeOwnOnlineMove(move){
  if(!online.active||st.mode!=='online'||!move||move.seq!==online.seq||(Number.isInteger(move.round)&&move.round!==online.round)||st.phase!=='playing')return;
+ if(move.replayVersion===1){
+  online.seenMoveId=move.id;online.ownShotId=move.id;online.shotSeq=move.seq;st.phase='sending';
+  (async()=>{
+   const stored=online.pendingRoom?.liveFrame||window.KanjiOnline?.latest?.liveFrame;
+   let payload=stored?.id===move.id&&stored.world?.replayData;
+   if(!payload){
+    payload=createShotReplay(move);
+    const pkt=JSON.parse(payload);pkt.playAt=Date.now()+1450;payload=JSON.stringify(pkt);
+    await postReplayFrameWithRetry(move.id,move.seq,payload,online.round);
+   }
+   if(online.active&&online.ownShotId===move.id)beginShotReplay(payload,'self',move.id);
+  })().catch(e=>{st.phase='syncing';showNetworkStatus('発射データの復旧に失敗しました：'+networkError(e),'error')});
+  return;
+ }
+
  const recorded=online.pendingRoom?.liveFrame||window.KanjiOnline?.latest?.liveFrame;
  online.ownShotId=move.id;online.shotSeq=move.seq;online.forceFrame=true;
  online.frameSentAt=-Infinity;online.frameBusy=false;
@@ -1156,6 +1422,9 @@ function resumeOwnOnlineMove(move){
 function replayOnlineMove(move){
  if(st.scene!=='game'||st.phase!=='playing'||move.seq!==online.seq||(Number.isInteger(move.round)&&move.round!==online.round))return;
  online.seenMoveId=move.id;
+ if(move.replayVersion===1){
+  st.phase='replayPending';showNetworkStatus('相手の軌道と火花演出を受信しています…','pending');return;
+ }
  const b=st.world.bodies.find(x=>x.id===move.bodyId&&x.alive);
  if(!b){showNetworkStatus('相手の手を同期できません。盤面更新を待っています。','error');st.phase='syncing';return;}
  fireShot(b,move.dx,move.dy,move.power,move.spin,move.spinStrength,true);
@@ -1184,6 +1453,16 @@ function sendLiveFrame(){
 }
 function applyRemoteFrame(room){
  const frame=room.liveFrame,move=room.move;
+ if(move?.replayVersion===1){
+  if(!frame?.world?.replayData||frame.id!==move.id||frame.seq!==online.seq||move.by===online.uid)return;
+  if(online.replay?.id===move.id||online.replayStarting)return;
+  online.replayStarting=true;
+  try{
+   beginShotReplay(frame.world.replayData,'remote',move.id);
+  }catch(e){showNetworkStatus('再生データの読み込みに失敗しました：'+networkError(e),'error');st.phase='syncing';}
+  finally{online.replayStarting=false;}
+  return;
+ }
  if(!frame||!move||frame.id!==move.id||frame.seq!==online.seq||move.by===online.uid||
   (Number.isInteger(frame.round)&&frame.round!==online.round))return;
  if(online.lastFrameId===frame.id&&frame.step<=online.lastFrameStep)return;
@@ -1280,7 +1559,7 @@ async function requestOnlineRematch(){
 }
 async function leaveOnlineRoom(){
  const net=window.KanjiOnline;online.active=false;cancelAsync();window.KanjiPractice?.stop();
- st.phase='title';st.drag=null;st.selected=null;online.gameReady=false;online.remoteBlend=null;
+ st.phase='title';st.drag=null;st.selected=null;online.gameReady=false;online.remoteBlend=null;online.replay=null;online.replayStarting=false;
  if(net)await net.leave();
  $('roomJoinBtn').classList.remove('hidden');$('roomJoinBtn').disabled=false;$('roomJoinBtn').textContent='合言葉でマッチング →';
  closeModal();changeScene('home');st.mode='solo';
@@ -1393,7 +1672,7 @@ window.visualViewport?.addEventListener('scroll',resizeCanvas);
 document.addEventListener('visibilitychange',()=>{animLast=0;st.acc=0;if(!document.hidden&&st.mode==='online'&&st.scene==='game'){showNetworkStatus('サーバーの最新盤面を確認中…','pending');const room=window.KanjiOnline?.latest;if(room&&!window.KanjiOnline?.latestMeta?.fromCache)handleOnlineRoom(room,window.KanjiOnline.latestMeta||{});}});
 window.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();return}if(e.code==='Space'&&st.scene==='game'&&st.drag&&st.drag.body&&st.drag.power>.06){e.preventDefault();const d=st.drag;fireShot(d.body,d.dx,d.dy,d.power,st.spin,d.spinStrength??1)}});
 // Extra hook for deterministic and automated smoke tests; only exposed when ?test=1.
-if(new URLSearchParams(location.search).has('test'))window.__KANJI_TEST__={st,P,online,setup,confirm,startMatch,fireShot,finishGame,finishShot,beginTurn,selectPiece,selectable,findSelected,aimSpinAt,draw:()=>paint(.016),cpuTakeTurn,resizeCanvas,tickPhysics,collisionHooks,handleOnlineRoom,enterOnlineSnapshot,showOnlineDeck,requestOnlineRematch,joinOnlineRoom,openOnlineMatch,startStreak,showStreakSetup,streakWin,streakDefeated,spawnStreakCpu,WORD_GROUPS};
+if(new URLSearchParams(location.search).has('test'))window.__KANJI_TEST__={st,P,online,setup,confirm,startMatch,fireShot,finishGame,finishShot,beginTurn,selectPiece,selectable,findSelected,aimSpinAt,draw:()=>paint(.016),cpuTakeTurn,resizeCanvas,tickPhysics,collisionHooks,createShotReplay,beginShotReplay,tickShotReplay,paintReplayFrame,addImpactSparks,handleOnlineRoom,enterOnlineSnapshot,showOnlineDeck,requestOnlineRematch,joinOnlineRoom,openOnlineMatch,startStreak,showStreakSetup,streakWin,streakDefeated,spawnStreakCpu,WORD_GROUPS};
 makeBoardArt();
 // Training-specific state, rendered with the live game's identical particle,
 // impact, trail, shock-wave and aim-arrow functions (no Firebase writes).
@@ -1407,7 +1686,7 @@ function createPracticeEffects(worldGetter){
  function label(s,x,y,color){v.texts.push({str:s,x,y,color,t:0,life:1.05})}
  v.reset=()=>{v.fx.length=0;v.texts.length=0;v.shake=0;v.flash=0;v.hitstop=0;v.impacts.clear()};
  v.update=dt=>{
-  for(let i=v.fx.length-1;i>=0;i--){const e=v.fx[i];e.t+=dt;if(e.type==='spark'){
+  for(let i=v.fx.length-1;i>=0;i--){const e=v.fx[i];e.t+=dt;if(e.type==='spark'||e.type==='contactSpark'){
    e.x+=e.vx*dt;e.y+=e.vy*dt;e.vx*=Math.exp(-3*dt);e.vy*=Math.exp(-3*dt)}
    if(e.t>e.life)v.fx.splice(i,1);
   }
@@ -1423,7 +1702,14 @@ function createPracticeEffects(worldGetter){
    const w=worldGetter(),shooter=(a.id===w.shooterId?a:b.id===w.shooterId?b:null);
    const key=a.static?'w'+b.id:b.static?'w'+a.id:[a.id,b.id].sort((x,y)=>x-y).join('_');
    if(w.time-(v.impacts.get(key)??-99)<.11)return;v.impacts.set(key,w.time);
-   if(speed>165){particles(p.x,p.y,Math.min(18,Math.round(speed/45)),'#fbda92',speed/330);v.shake=Math.max(v.shake,clamp(speed/100,1.5,7.5));}
+   if(speed>=80){
+    const count=Math.max(5,Math.min(24,Math.round(5+speed/48)));
+    for(let i=0;i<count&&v.fx.length<260;i++){
+     const a=Math.random()*TAU,k=(90+Math.random()*360)*Math.min(1.9,.65+speed/420);
+     v.fx.push({type:'contactSpark',x:p.x,y:p.y,vx:Math.cos(a)*k,vy:Math.sin(a)*k,r:1.4+Math.random()*2.6,t:0,life:.16+Math.random()*.29,color:i%4===0?'#ffffff':i%3===0?'#ff9e3b':'#ffe19a'});
+    }
+   }
+   if(speed>165)v.shake=Math.max(v.shake,clamp(speed/100,1.5,7.5));
    if(!w.preparation&&shooter&&a.owner!==b.owner&&!a.static&&!b.static){
     if(shooter.ability==='giant'&&P.growGiant(w,shooter)){
      ring(shooter.x,shooter.y,'#eac864',shooter.radius*1.7);particles(shooter.x,shooter.y,23,'#ffd774',1.3);

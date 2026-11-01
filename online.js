@@ -1,7 +1,8 @@
-/* 漢字おはじき Ver.2.7.4 — authoritative shooter snapshots.
-   The shooter's physics is authoritative. During an active shot, lightweight
-   periodic snapshots prevent cross-device font/physics drift. Turn-end state
-   is committed in a Firestore transaction. Server-side game anti-cheat is NOT supplied. */
+/* 漢字おはじき Ver.2.7.5 — authoritative shooter and shared battle replay.
+   A replay packet (one Firestore liveFrame update) carries the entire physics
+   path and collision effects; the older snapshot API remains for legacy moves.
+   Turn-end state is committed in a Firestore transaction.
+   No server-side game anti-cheat is supplied. */
 import {initializeApp} from 'https://www.gstatic.com/firebasejs/12.11.0/firebase-app.js';
 import {getAuth,signInAnonymously} from 'https://www.gstatic.com/firebasejs/12.11.0/firebase-auth.js';
 import {getFirestore,doc,runTransaction,onSnapshot,updateDoc,serverTimestamp,collection,query,orderBy,limit,getDocs} from 'https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js';
@@ -135,11 +136,16 @@ async function sendShot(move){
   shot.seq=d.seq;shot.round=d.round;tx.update(roomRef,{move:shot,liveFrame:null,updatedAt:serverTimestamp()});
  });return shot;
 }
-// Approximately 2.2 snapshots/sec per ongoing shot. Old/stale frames are ignored by
-// the receiving client and (with production rules) rejected after shot completion.
+// For replayVersion:1, transmit ONE encoded replay as liveFrame.world.replayData.
+// Older clients may still send legacy moving-world snapshots through this API.
 async function pushFrame(shotId,seq,step,snapshot,round){
  assertConnected();assertFirestoreCompatible(snapshot);
  if(!Number.isInteger(step)||step<1||step>10000)throw Error('同期番号が不正です');
+ // The full 30fps recording is transported as one compact JSON string inside
+ // the EXISTING liveFrame.world map. This is accepted by the V2.6 Firestore
+ // rules, unlike nested Firestore arrays or new top-level document fields.
+ const bytes=new TextEncoder().encode(JSON.stringify(snapshot)).length;
+ if(bytes>720000)throw Error('再生データが大きすぎます（'+bytes+'バイト）。安全のため送信を中止しました。');
  await updateDoc(roomRef,{liveFrame:{id:shotId,seq,step,round,world:snapshot},updatedAt:serverTimestamp()});
 }
 async function finishShot(shotId,snapshot,turn,stats,result){

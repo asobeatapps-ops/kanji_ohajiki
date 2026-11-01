@@ -1,4 +1,4 @@
-/* 漢字おはじき Ver.2.7.4: dependency-free 2D compound-SAT impulse solver.
+/* 漢字おはじき Ver.2.7.5: dependency-free 2D compound-SAT impulse solver.
    World units: board coordinates 540 x 760. Time: seconds. Clockwise rotation is positive.
    Runs physics at a fixed 1/120 second timestep in game.js, render separately.
 */
@@ -856,7 +856,7 @@ function packWorld(world){
   awakenedOwners:[...world.awakenedOwners],fields:world.fields.map(f=>({...f})),
   magnets:world.magnets.map(m=>({...m,center:{...m.center},targets:[...m.targets]})),
   vortices:world.vortices.map(v=>({...v,center:{...v.center},targets:v.targets.map(t=>({...t}))})),
-  shocks:world.shocks.map(w=>({...w,jumpDir:{...w.jumpDir},hit:[...w.hit],pending:w.pending.map(p=>({...p}))})),
+  shocks:world.shocks.map(w=>({...w,jumpDir:{...w.jumpDir},hit:[...w.hit],pending:(w.pending||[]).map(p=>({...p}))})),
   bodies:world.bodies.filter(b=>b.alive).map(b=>{
    const obj={};for(const k of bKeys)if(b[k]!==undefined)obj[k]=b[k];return obj;
   })
