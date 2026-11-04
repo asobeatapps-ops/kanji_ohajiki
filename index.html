@@ -15,7 +15,7 @@
 <body>
 <div id="app">
   <header class="brandbar">
-    <div class="brand"><span class="brand-icon">A</span><div>ASOBEAT <span class="brand-sub">/ KANJI CLASH</span></div></div>
+    <a class="brand asobeat-brand-home" href="https://asobeatapps-ops.github.io/gamehome/" aria-label="ASOBEATのゲーム一覧に戻る" title="ASOBEATのゲーム一覧へ"><span class="brand-icon">A</span><div>ASOBEAT <span class="brand-sub">/ KANJI CLASH</span></div></a>
     <div class="top-controls"><button id="helpBtn" class="roundbtn" type="button" aria-label="遊び方">?</button><button id="soundBtn" class="roundbtn" type="button" aria-label="効果音切り替え">♪</button></div>
   </header>
 
@@ -185,7 +185,13 @@
       </form>
     </section>
     <button class="solid-btn" id="rematchBtn" type="button">もう一度戦う <span>↻</span></button>
+    <a class="solid-btn asobeat-more-games" id="asobeatMoreGames" href="https://asobeatapps-ops.github.io/gamehome/">🎮 他のゲームも遊んでみる <span aria-hidden="true">→</span></a>
     <button class="ghost-btn" id="resultHomeBtn" type="button">タイトルへ戻る</button>
+    <!-- AdSense承認前は非表示。広告コードと広告枠の設定後、hiddenを外して有効化する。 -->
+    <aside id="asobeatResultAd" class="asobeat-result-ad" aria-label="広告掲載エリア" hidden>
+      <div class="asobeat-ad-caption">広告</div>
+      <div class="asobeat-ad-placement" data-ad-position="kanji-result" aria-hidden="true"></div>
+    </aside>
   </main>
 
   <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
